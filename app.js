@@ -10,7 +10,7 @@ let span = 1829, width = 610, defaultHeight = 7600, drawingScale = 100, mmPerPx 
 let pdfDoc = null, pageNumber = 1, pageCount = 0, baseStage = {width:1120,height:760};
 let calibrationPoints = [], drag = null, renderTask = null;
 
-const stage = $("stage"), layer = $("blocksLayer"), calLayer = $("calibrationLayer"), canvas = $("pdfCanvas");
+const stage = $("stage"), layer = $("blocksLayer"), postsLayer = $("postsLayer"), calLayer = $("calibrationLayer"), canvas = $("pdfCanvas");
 const uid = () => Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,8);
 const status = (message) => {$("status").textContent=message;$("ratio").textContent=mmPerPx.toFixed(2)+" mm / px"};
 const saveLocal = () => localStorage.setItem(KEY,JSON.stringify({blocks,mmPerPx,drawingScale}));
@@ -24,6 +24,15 @@ const commit = (next) => {history=[...history.slice(-39),structuredClone(blocks)
 const point = (event) => {const rect=stage.getBoundingClientRect();return{x:(event.clientX-rect.left)/zoom,y:(event.clientY-rect.top)/zoom}};
 const dimensions = (b) => ({w:(b.rotation===0?b.span:b.width)/mmPerPx,h:(b.rotation===0?b.width:b.span)/mmPerPx});
 const corners = (b) => {const {w,h}=dimensions(b);return[[b.x,b.y],[b.x+w,b.y],[b.x,b.y+h],[b.x+w,b.y+h]]};
+function uniquePostPositions(){
+  const positions=new Map();
+  blocks.forEach(b=>corners(b).forEach(([x,y])=>{
+    const key=Math.round(x*1000)+","+Math.round(y*1000),current=positions.get(key);
+    if(current){if(b.id===selectedId)current.selected=true}
+    else positions.set(key,{x,y,selected:b.id===selectedId});
+  }));
+  return [...positions.values()];
+}
 const overlapArea = (a,b) => {
   const ad=dimensions(a),bd=dimensions(b);
   return Math.max(0,Math.min(a.x+ad.w,b.x+bd.w)-Math.max(a.x,b.x))*Math.max(0,Math.min(a.y+ad.h,b.y+bd.h)-Math.max(a.y,b.y));
@@ -64,21 +73,29 @@ async function renderPdf(){
 function setStageSize(){stage.style.width=baseStage.width*zoom+"px";stage.style.height=baseStage.height*zoom+"px";renderBlocks();renderCalibration()}
 function renderBlocks(){
   layer.innerHTML="";
-  blocks.forEach((b,index)=>{
+  blocks.forEach(b=>{
     const w=(b.rotation===0?b.span:b.width)/mmPerPx,h=(b.rotation===0?b.width:b.span)/mmPerPx;
     const el=document.createElement("button");el.className="scaffold-block"+(b.id===selectedId?" selected":"");el.dataset.id=b.id;
     Object.assign(el.style,{left:b.x*zoom+"px",top:b.y*zoom+"px",width:w*zoom+"px",height:h*zoom+"px",borderColor:COLORS[b.span],backgroundColor:COLORS[b.span]+"30","--c":COLORS[b.span]});
-    el.innerHTML="<span>"+(index+1)+"</span>"+(w*zoom>58?"<small>"+b.span+"</small>":"")+'<i class="post-dot tl"></i><i class="post-dot tr"></i><i class="post-dot bl"></i><i class="post-dot br"></i>';
+    el.innerHTML='<span class="block-size">'+b.span+" × "+b.width+"</span>";
     el.addEventListener("pointerdown",(e)=>{e.stopPropagation();selectBlock(b.id);setTool("select");const p=point(e);history=[...history.slice(-39),structuredClone(blocks)];future=[];drag={id:b.id,dx:p.x-b.x,dy:p.y-b.y};el.setPointerCapture(e.pointerId)});
     el.addEventListener("click",(e)=>e.stopPropagation());layer.appendChild(el);
   });
+  renderPosts();
   $("undo").disabled=!history.length;$("redo").disabled=!future.length;
+}
+function renderPosts(){
+  postsLayer.innerHTML="";
+  uniquePostPositions().forEach(p=>{
+    const el=document.createElement("i");el.className="post-dot"+(p.selected?" selected-post":"");
+    el.style.left=p.x*zoom+"px";el.style.top=p.y*zoom+"px";postsLayer.appendChild(el);
+  });
 }
 function renderCalibration(){calLayer.innerHTML="";calibrationPoints.forEach((p,i)=>{const el=document.createElement("span");el.className="cal-point";el.style.left=p.x*zoom+"px";el.style.top=p.y*zoom+"px";el.textContent=i+1;calLayer.appendChild(el)})}
 function selectBlock(id){
   selectedId=id;renderBlocks();const b=blocks.find(v=>v.id===id);
   $("selectionEmpty").classList.toggle("hidden",!!b);$("selectionEditor").classList.toggle("hidden",!b);
-  $("selectionBadge").textContent=b?"No."+(blocks.findIndex(v=>v.id===id)+1):"未選択";
+  $("selectionBadge").textContent=b?"選択中":"未選択";
   if(b){$("selectedColor").style.background=COLORS[b.span];$("selectedSpec").textContent=b.span+" × "+b.width;$("selectedHeight").value=b.height;$("selectedLevels").textContent=Math.ceil(b.height/1900)+"段"}
 }
 function updateSummary(){
@@ -89,11 +106,10 @@ function updateSummary(){
 }
 function quantities(){
   if(!blocks.length)return[];
-  const levels=b=>Math.max(1,Math.ceil(b.height/1900)),totalLevels=blocks.reduce((s,b)=>s+levels(b),0),points=new Set();
-  blocks.forEach(b=>{const w=(b.rotation===0?b.span:b.width)/mmPerPx,h=(b.rotation===0?b.width:b.span)/mmPerPx;[[b.x,b.y],[b.x+w,b.y],[b.x,b.y+h],[b.x+w,b.y+h]].forEach(([x,y])=>points.add(Math.round(x/4)+","+Math.round(y/4)))});
+  const levels=b=>Math.max(1,Math.ceil(b.height/1900)),totalLevels=blocks.reduce((s,b)=>s+levels(b),0),postCount=uniquePostPositions().length;
   const maxLevels=Math.max(...blocks.map(levels)),decks=blocks.reduce((s,b)=>s+levels(b)*Math.max(1,Math.ceil(b.width/500)),0);
   const length=blocks.reduce((s,b)=>s+b.span,0)/1000,maxHeight=Math.max(...blocks.map(b=>b.height))/1000;
-  return [["支柱位置","平面上の建地",points.size,"箇所"],["支柱部材","1,900mm相当",points.size*maxLevels,"本"],["ジャッキベース","標準",points.size,"本"],["布材","スパン別概算",totalLevels*2,"本"],["腕木","足場幅別概算",totalLevels*2,"本"],["鋼製踏板","500幅換算",decks,"枚"],["先行手すり","外側",totalLevels,"枚"],["幅木","外側",totalLevels,"枚"],["壁つなぎ","8m×9m目安",Math.max(1,Math.ceil(length/8)*Math.ceil(maxHeight/9)),"本"]];
+  return [["支柱位置","平面上の建地",postCount,"箇所"],["支柱部材","1,900mm相当",postCount*maxLevels,"本"],["ジャッキベース","標準",postCount,"本"],["布材","スパン別概算",totalLevels*2,"本"],["腕木","足場幅別概算",totalLevels*2,"本"],["鋼製踏板","500幅換算",decks,"枚"],["先行手すり","外側",totalLevels,"枚"],["幅木","外側",totalLevels,"枚"],["壁つなぎ","8m×9m目安",Math.max(1,Math.ceil(length/8)*Math.ceil(maxHeight/9)),"本"]];
 }
 function download(name,content,type){const url=URL.createObjectURL(new Blob([content],{type})),a=document.createElement("a");a.href=url;a.download=name;a.click();URL.revokeObjectURL(url)}
 
