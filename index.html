@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="PDF図面上にIQ足場を配置し、基本部材の概算数量を拾えるツールです。">
   <title>簡易足場拾い｜IQ足場の概算数量</title>
-  <link rel="stylesheet" href="./style.css?v=2">
+  <link rel="stylesheet" href="./style.css?v=4">
 </head>
 <body>
   <header class="topbar">
@@ -74,6 +74,7 @@
           <canvas id="pdfCanvas"></canvas>
           <div class="empty-plan" id="emptyPlan"><span>▦</span><strong>PDF図面を読み込んでください</strong><small>図面なしでも足場配置を試せます</small></div>
           <div id="blocksLayer"></div>
+          <div id="postsLayer"></div>
           <div id="calibrationLayer"></div>
         </div>
       </div>
@@ -101,6 +102,6 @@
       </section>
     </aside>
   </main>
-  <script type="module" src="./app.js?v=2"></script>
+  <script type="module" src="./app.js?v=4"></script>
 </body>
 </html>
