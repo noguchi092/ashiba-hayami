@@ -7,7 +7,7 @@ const BASE_SCALE = 1.25, KEY = "ashiba-hayami-v1";
 let blocks=[],history=[],future=[],selectedId=null,selectedIds=new Set(),tool="add";
 let span=1829,width=610,defaultFL=7600,defaultBaseHeight=0,drawingScale=100,mmPerPx=28.222,zoom=1;
 let pdfDoc=null,pageNumber=1,pageCount=0,baseStage={width:1120,height:760};
-let calibrationPoints=[],drag=null,range=null,renderTask=null,fitOnNextRender=false,panelCollapsed=true;
+let calibrationPoints=[],drag=null,range=null,renderTask=null,fitOnNextRender=false,panelCollapsed=true,suppressNextClick=false;
 
 const stage=$("stage"),layer=$("blocksLayer"),postsLayer=$("postsLayer"),selectionLayer=$("selectionLayer"),calLayer=$("calibrationLayer"),canvas=$("pdfCanvas");
 const uid=()=>Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,8);
@@ -186,6 +186,7 @@ stage.addEventListener("pointerdown",e=>{
   stage.classList.add("range-selecting");stage.setPointerCapture(e.pointerId);renderRange();
 });
 stage.addEventListener("click",e=>{
+  if(suppressNextClick){suppressNextClick=false;return}
   const p=point(e);
   if(tool==="calibrate"){
     calibrationPoints=[...calibrationPoints,p].slice(-2);renderCalibration();
@@ -215,7 +216,7 @@ stage.addEventListener("pointerup",e=>{
   if(range){
     range.current=point(e);const r=rectangle(range.start,range.current);
     const ids=blocks.filter(b=>{const d=dimensions(b);return b.x+d.w>=r.left&&b.x<=r.right&&b.y+d.h>=r.top&&b.y<=r.bottom}).map(b=>b.id);
-    range=null;stage.classList.remove("range-selecting");renderRange();selectBlocks(ids);status(ids.length?ids.length+"件の足場を範囲選択しました":"範囲内に足場がありません");
+    range=null;suppressNextClick=true;stage.classList.remove("range-selecting");renderRange();selectBlocks(ids);status(ids.length?ids.length+"件の足場を範囲選択しました":"範囲内に足場がありません");
   }
   if(drag){drag=null;saveLocal();updateSelectionEditor()}
 });
