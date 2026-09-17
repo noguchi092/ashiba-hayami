@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="PDF図面上にIQ足場を配置し、基本部材の概算数量を拾えるツールです。">
+  <title>簡易足場拾い｜IQ足場の概算数量</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-mark">▦</div>
+    <div class="brand"><h1>簡易足場拾い</h1><span>IQ足場・概算検討版</span></div>
+    <div class="top-actions">
+      <label class="btn secondary">データ読込<input id="projectInput" type="file" accept=".json" hidden></label>
+      <button class="btn secondary" id="saveProject">保存</button>
+      <button class="btn primary" id="print">PDF出力</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="panel left-panel">
+      <section>
+        <div class="section-title"><b>1</b><h2>図面</h2></div>
+        <label class="pdf-drop">
+          <span class="upload-icon">⇧</span>
+          <strong id="pdfName">PDFを選択</strong>
+          <small id="pdfHelp">またはここへドロップ</small>
+          <input id="pdfInput" type="file" accept="application/pdf" hidden>
+        </label>
+        <div class="page-nav hidden" id="pageNav"><button id="prevPage">‹</button><span id="pageLabel">1 / 1</span><button id="nextPage">›</button></div>
+      </section>
+
+      <section>
+        <div class="section-title"><b>2</b><h2>縮尺</h2></div>
+        <label>図面縮尺</label>
+        <select id="drawingScale">
+          <option value="50">1 / 50</option><option value="100" selected>1 / 100</option>
+          <option value="150">1 / 150</option><option value="200">1 / 200</option>
+          <option value="250">1 / 250</option><option value="500">1 / 500</option>
+        </select>
+        <div class="calibration">
+          <label>分かっている寸法（mm）</label>
+          <input id="knownLength" type="number" min="1" value="6000">
+          <button class="btn outline full" id="calibrate">⌖ 2点で縮尺補正</button>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-title"><b>3</b><h2>配置する足場</h2></div>
+        <label>スパン</label>
+        <div class="span-grid" id="spanGrid">
+          <button class="active" data-span="1829" style="--c:#1684f8">1829<small>mm</small></button>
+          <button data-span="1524" style="--c:#00a88f">1524<small>mm</small></button>
+          <button data-span="1219" style="--c:#6f63e8">1219<small>mm</small></button>
+          <button data-span="914" style="--c:#e88b18">914<small>mm</small></button>
+          <button data-span="610" style="--c:#dd4e68">610<small>mm</small></button>
+        </div>
+        <div class="two-fields">
+          <div><label>足場幅</label><select id="scaffoldWidth"><option>610</option><option>914</option><option>1219</option></select></div>
+          <div><label>高さ（mm）</label><input id="defaultHeight" type="number" min="1900" step="100" value="7600"></div>
+        </div>
+        <button class="btn primary full" id="addMode">＋ 図面をクリックして配置</button>
+      </section>
+    </aside>
+
+    <section class="drawing-area">
+      <div class="toolbar">
+        <div><button class="tool" id="selectMode">↖ 選択</button><button class="tool active" id="placeMode">▭ 足場配置</button></div>
+        <div><button class="icon-btn" id="undo" title="元に戻す">↶</button><button class="icon-btn" id="redo" title="やり直す">↷</button><i></i><button class="icon-btn" id="zoomOut">−</button><span id="zoomLabel">100%</span><button class="icon-btn" id="zoomIn">＋</button></div>
+      </div>
+      <div class="canvas-scroll" id="canvasScroll">
+        <div class="drawing-stage tool-add" id="stage">
+          <canvas id="pdfCanvas"></canvas>
+          <div class="empty-plan" id="emptyPlan"><span>▦</span><strong>PDF図面を読み込んでください</strong><small>図面なしでも足場配置を試せます</small></div>
+          <div id="blocksLayer"></div>
+          <div id="calibrationLayer"></div>
+        </div>
+      </div>
+      <div class="statusbar"><span id="status">新しい拾いを開始できます</span><span id="ratio">28.22 mm / px</span></div>
+    </section>
+
+    <aside class="panel right-panel">
+      <section class="card">
+        <div class="card-title"><h2>選択中の足場</h2><span class="badge" id="selectionBadge">未選択</span></div>
+        <div id="selectionEmpty" class="empty-selection">図面上の足場を選ぶと、高さや向きを変更できます。</div>
+        <div id="selectionEditor" class="hidden">
+          <div class="selected-spec"><i id="selectedColor"></i><strong id="selectedSpec"></strong><small>mm</small></div>
+          <label>高さ（mm）</label><input id="selectedHeight" type="number" min="1900" step="100">
+          <p class="levels">足場段数 <strong id="selectedLevels">0段</strong></p>
+          <div class="selection-actions"><button id="rotate">↻ 回転</button><button id="duplicate">⧉ 複製</button><button id="remove" class="danger">削除</button></div>
+        </div>
+      </section>
+
+      <section class="card summary">
+        <div class="card-title"><h2>概算数量</h2><span class="badge pale">自動集計</span></div>
+        <div class="metrics"><div><span>スパン数</span><strong id="metricCount">0</strong><small>箇所</small></div><div><span>延長</span><strong id="metricLength">0.0</strong><small>m</small></div><div><span>掛面積</span><strong id="metricArea">0.0</strong><small>㎡</small></div></div>
+        <div class="table-wrap"><table><thead><tr><th>部材</th><th>数量</th></tr></thead><tbody id="quantityBody"><tr><td colspan="2" class="zero">足場を配置すると集計します</td></tr></tbody></table></div>
+        <button class="btn outline full" id="csv" disabled>⇩ CSVで保存</button>
+        <p class="disclaimer">本数量は配置条件から算出した概算です。発注・施工前に足場業者および有資格者が確認してください。</p>
+      </section>
+    </aside>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
