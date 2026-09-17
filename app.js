@@ -22,6 +22,25 @@ const setTool = (next) => {
 };
 const commit = (next) => {history=[...history.slice(-39),structuredClone(blocks)];future=[];blocks=next;saveLocal();renderBlocks();updateSummary()};
 const point = (event) => {const rect=stage.getBoundingClientRect();return{x:(event.clientX-rect.left)/zoom,y:(event.clientY-rect.top)/zoom}};
+const dimensions = (b) => ({w:(b.rotation===0?b.span:b.width)/mmPerPx,h:(b.rotation===0?b.width:b.span)/mmPerPx});
+const corners = (b) => {const {w,h}=dimensions(b);return[[b.x,b.y],[b.x+w,b.y],[b.x,b.y+h],[b.x+w,b.y+h]]};
+const overlapArea = (a,b) => {
+  const ad=dimensions(a),bd=dimensions(b);
+  return Math.max(0,Math.min(a.x+ad.w,b.x+bd.w)-Math.max(a.x,b.x))*Math.max(0,Math.min(a.y+ad.h,b.y+bd.h)-Math.max(a.y,b.y));
+};
+function snapBlock(candidate,excludeId=null){
+  const threshold=18/zoom,candidateCorners=corners(candidate);let best=null;
+  blocks.filter(b=>b.id!==excludeId).forEach(other=>{
+    corners(other).forEach(target=>candidateCorners.forEach(source=>{
+      const dx=target[0]-source[0],dy=target[1]-source[1],distance=Math.hypot(dx,dy);
+      if(distance>threshold||best&&distance>=best.distance)return;
+      const snapped={...candidate,x:Math.max(0,candidate.x+dx),y:Math.max(0,candidate.y+dy)};
+      if(overlapArea(snapped,other)>1)return;
+      best={block:snapped,distance};
+    }));
+  });
+  return best?{block:best.block,snapped:true}:{block:candidate,snapped:false};
+}
 
 async function loadPdf(file){
   try{
@@ -49,7 +68,7 @@ function renderBlocks(){
     const w=(b.rotation===0?b.span:b.width)/mmPerPx,h=(b.rotation===0?b.width:b.span)/mmPerPx;
     const el=document.createElement("button");el.className="scaffold-block"+(b.id===selectedId?" selected":"");el.dataset.id=b.id;
     Object.assign(el.style,{left:b.x*zoom+"px",top:b.y*zoom+"px",width:w*zoom+"px",height:h*zoom+"px",borderColor:COLORS[b.span],backgroundColor:COLORS[b.span]+"30","--c":COLORS[b.span]});
-    el.innerHTML="<span>"+(index+1)+"</span>"+(w*zoom>58?"<small>"+b.span+"</small>":"");
+    el.innerHTML="<span>"+(index+1)+"</span>"+(w*zoom>58?"<small>"+b.span+"</small>":"")+'<i class="post-dot tl"></i><i class="post-dot tr"></i><i class="post-dot bl"></i><i class="post-dot br"></i>';
     el.addEventListener("pointerdown",(e)=>{e.stopPropagation();selectBlock(b.id);setTool("select");const p=point(e);history=[...history.slice(-39),structuredClone(blocks)];future=[];drag={id:b.id,dx:p.x-b.x,dy:p.y-b.y};el.setPointerCapture(e.pointerId)});
     el.addEventListener("click",(e)=>e.stopPropagation());layer.appendChild(el);
   });
@@ -92,10 +111,11 @@ stage.addEventListener("click",e=>{
   const p=point(e);
   if(tool==="calibrate"){calibrationPoints=[...calibrationPoints,p].slice(-2);renderCalibration();if(calibrationPoints.length===2){const px=Math.hypot(calibrationPoints[1].x-calibrationPoints[0].x,calibrationPoints[1].y-calibrationPoints[0].y),known=Number($("knownLength").value);if(px>2&&known>0){mmPerPx=known/px;saveLocal();renderBlocks();status("基準寸法 "+known.toLocaleString()+"mm で補正しました");setTool("add")}}return}
   if(tool!=="add"){selectBlock(null);return}
-  const w=span/mmPerPx,d=width/mmPerPx,b={id:uid(),x:Math.max(0,p.x-w/2),y:Math.max(0,p.y-d/2),span,width,height:defaultHeight,rotation:0};
-  commit([...blocks,b]);selectBlock(b.id);status(span+"mmスパンを配置しました");
+  const w=span/mmPerPx,d=width/mmPerPx,raw={id:uid(),x:Math.max(0,p.x-w/2),y:Math.max(0,p.y-d/2),span,width,height:defaultHeight,rotation:0};
+  const result=snapBlock(raw),b=result.block;
+  commit([...blocks,b]);selectBlock(b.id);status(result.snapped?"支柱位置に吸着して配置しました":span+"mmスパンを配置しました");
 });
-stage.addEventListener("pointermove",e=>{if(!drag)return;const p=point(e);blocks=blocks.map(b=>b.id===drag.id?{...b,x:Math.max(0,p.x-drag.dx),y:Math.max(0,p.y-drag.dy)}:b);renderBlocks();updateSummary()});
+stage.addEventListener("pointermove",e=>{if(!drag)return;const p=point(e),moving=blocks.find(b=>b.id===drag.id);if(!moving)return;const result=snapBlock({...moving,x:Math.max(0,p.x-drag.dx),y:Math.max(0,p.y-drag.dy)},drag.id);blocks=blocks.map(b=>b.id===drag.id?result.block:b);if(result.snapped)status("支柱位置に吸着しました");renderBlocks();updateSummary()});
 stage.addEventListener("pointerup",()=>{if(drag){drag=null;saveLocal()}});stage.addEventListener("pointercancel",()=>drag=null);
 $("zoomOut").onclick=async()=>{zoom=Math.max(.5,+(zoom-.15).toFixed(2));$("zoomLabel").textContent=Math.round(zoom*100)+"%";pdfDoc?await renderPdf():setStageSize()};
 $("zoomIn").onclick=async()=>{zoom=Math.min(2.5,+(zoom+.15).toFixed(2));$("zoomLabel").textContent=Math.round(zoom*100)+"%";pdfDoc?await renderPdf():setStageSize()};
