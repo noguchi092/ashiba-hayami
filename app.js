@@ -93,7 +93,7 @@ function quantities(){
   blocks.forEach(b=>{const w=(b.rotation===0?b.span:b.width)/mmPerPx,h=(b.rotation===0?b.width:b.span)/mmPerPx;[[b.x,b.y],[b.x+w,b.y],[b.x,b.y+h],[b.x+w,b.y+h]].forEach(([x,y])=>points.add(Math.round(x/4)+","+Math.round(y/4)))});
   const maxLevels=Math.max(...blocks.map(levels)),decks=blocks.reduce((s,b)=>s+levels(b)*Math.max(1,Math.ceil(b.width/500)),0);
   const length=blocks.reduce((s,b)=>s+b.span,0)/1000,maxHeight=Math.max(...blocks.map(b=>b.height))/1000;
-  return [["支柱","1,900mm相当",points.size*maxLevels,"本"],["ジャッキベース","標準",points.size,"本"],["布材","スパン別概算",totalLevels*2,"本"],["腕木","足場幅別概算",totalLevels*2,"本"],["鋼製踏板","500幅換算",decks,"枚"],["先行手すり","外側",totalLevels,"枚"],["幅木","外側",totalLevels,"枚"],["壁つなぎ","8m×9m目安",Math.max(1,Math.ceil(length/8)*Math.ceil(maxHeight/9)),"本"]];
+  return [["支柱位置","平面上の建地",points.size,"箇所"],["支柱部材","1,900mm相当",points.size*maxLevels,"本"],["ジャッキベース","標準",points.size,"本"],["布材","スパン別概算",totalLevels*2,"本"],["腕木","足場幅別概算",totalLevels*2,"本"],["鋼製踏板","500幅換算",decks,"枚"],["先行手すり","外側",totalLevels,"枚"],["幅木","外側",totalLevels,"枚"],["壁つなぎ","8m×9m目安",Math.max(1,Math.ceil(length/8)*Math.ceil(maxHeight/9)),"本"]];
 }
 function download(name,content,type){const url=URL.createObjectURL(new Blob([content],{type})),a=document.createElement("a");a.href=url;a.download=name;a.click();URL.revokeObjectURL(url)}
 
