@@ -182,7 +182,7 @@ $("summaryToggle").onclick=()=>{panelCollapsed=!panelCollapsed;applyPanelState()
 
 stage.addEventListener("contextmenu",e=>e.preventDefault());
 stage.addEventListener("pointerdown",e=>{
-  if(e.button!==2)return;e.preventDefault();setTool("select");const p=point(e);range={start:p,current:p};
+  if(e.button!==2&&!(e.button===0&&e.shiftKey))return;e.preventDefault();setTool("select");const p=point(e);range={start:p,current:p};
   stage.classList.add("range-selecting");stage.setPointerCapture(e.pointerId);renderRange();
 });
 stage.addEventListener("click",e=>{
