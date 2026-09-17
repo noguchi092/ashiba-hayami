@@ -1,5 +1,7 @@
 # 簡易足場拾い
 
+公開サイト: https://noguchi092.github.io/ashiba-hayami/
+
 PDF図面上にIQ足場のスパンを配置し、基本部材の概算数量を拾うブラウザツールです。
 
 - PDF・作業データは端末内で処理
