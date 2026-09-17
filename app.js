@@ -166,6 +166,13 @@ function applyPanelState(){
 function download(name,content,type){
   const url=URL.createObjectURL(new Blob([content],{type})),a=document.createElement("a");a.href=url;a.download=name;a.click();URL.revokeObjectURL(url);
 }
+function removeSelected(){
+  if(!selectedIds.size)return;
+  const count=selectedIds.size;
+  commit(blocks.filter(b=>!selectedIds.has(b.id)));
+  selectBlocks([]);
+  status(count+"件の足場を削除しました（元に戻すことができます）");
+}
 
 $("pdfInput").addEventListener("change",e=>e.target.files[0]&&loadPdf(e.target.files[0]));
 document.querySelector(".pdf-drop").addEventListener("dragover",e=>e.preventDefault());
@@ -230,7 +237,15 @@ $("selectedFL").onchange=e=>applyElevationChange("fl",e.target.value);
 $("selectedBaseHeight").onchange=e=>applyElevationChange("baseHeight",e.target.value);
 $("rotate").onclick=()=>{if(!selectedIds.size)return;commit(blocks.map(b=>selectedIds.has(b.id)?{...b,rotation:b.rotation===0?90:0}:b));updateSelectionEditor()};
 $("duplicate").onclick=()=>{const copies=selectedBlocks().map(b=>({...b,id:uid(),x:b.x+18,y:b.y+18}));if(!copies.length)return;commit([...blocks,...copies]);selectBlocks(copies.map(b=>b.id))};
-$("remove").onclick=()=>{if(!selectedIds.size)return;commit(blocks.filter(b=>!selectedIds.has(b.id)));selectBlocks([])};
+$("remove").onclick=removeSelected;
+document.addEventListener("keydown",e=>{
+  if(e.key!=="Delete"&&e.key!=="Backspace")return;
+  const target=e.target;
+  if(target instanceof HTMLInputElement||target instanceof HTMLTextAreaElement||target instanceof HTMLSelectElement||target?.isContentEditable)return;
+  if(!selectedIds.size)return;
+  e.preventDefault();
+  removeSelected();
+});
 $("saveProject").onclick=()=>{download("足場拾いデータ.json",JSON.stringify({version:2,blocks,mmPerPx,drawingScale,savedAt:new Date().toISOString()},null,2),"application/json");status("作業データを保存しました")};
 $("projectInput").onchange=async e=>{try{const data=JSON.parse(await e.target.files[0].text());if(!Array.isArray(data.blocks))throw new Error();history=[...history,structuredClone(blocks)];blocks=data.blocks.map(normalizeBlock);mmPerPx=data.mmPerPx||mmPerPx;drawingScale=data.drawingScale||drawingScale;$("drawingScale").value=drawingScale;selectBlocks([]);saveLocal();renderBlocks();updateSummary();status("作業データを読み込みました")}catch{status("作業データを読み込めませんでした")}};
 $("csv").onclick=()=>{const rows=[["部材名","規格・条件","数量","単位"],...quantities()],csv="\ufeff"+rows.map(r=>r.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(",")).join("\r\n");download("足場概算数量.csv",csv,"text/csv;charset=utf-8")};
