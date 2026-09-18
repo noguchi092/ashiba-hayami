@@ -8,8 +8,8 @@ const BASE_SCALE = 1.25, KEY = "ashiba-hayami-v1";
 const columnPlanCache=new Map();
 let blocks=[],history=[],future=[],selectedId=null,selectedIds=new Set(),tool="add",placementStair=false;
 let span=1829,width=610,defaultFL=700,defaultBaseHeight=0,defaultFloorCount=1,drawingScale=100,mmPerPx=28.222,zoom=1;
-let pdfDoc=null,pageNumber=1,pageCount=0,baseStage={width:1120,height:760};
-let calibrationPoints=[],drag=null,range=null,pan=null,renderTask=null,fitOnNextRender=false,panelCollapsed=true,suppressNextClick=false;
+let pdfDoc=null,pdfSourceBytes=null,pdfSourceName="",pageNumber=1,pageCount=0,baseStage={width:1120,height:760};
+let calibrationPoints=[],drag=null,range=null,series=null,pan=null,renderTask=null,fitOnNextRender=false,panelCollapsed=true,suppressNextClick=false;
 let wheelTimer=null,pendingWheelZoom=null,wheelAnchor=null,levelApplyTimer=null;
 
 const stage=$("stage"),layer=$("blocksLayer"),postsLayer=$("postsLayer"),selectionLayer=$("selectionLayer"),calLayer=$("calibrationLayer"),canvas=$("pdfCanvas"),canvasScroll=$("canvasScroll");
@@ -142,7 +142,8 @@ function snapBlock(candidate,excludeId=null){
 async function loadPdf(file){
   try{
     status("PDFを読み込んでいます…");
-    pdfDoc=await pdfjsLib.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+    const source=new Uint8Array(await file.arrayBuffer());pdfSourceBytes=source.slice();pdfSourceName=file.name||"drawing.pdf";
+    pdfDoc=await pdfjsLib.getDocument({data:source}).promise;
     pageCount=pdfDoc.numPages;pageNumber=1;$("pdfName").textContent=file.name;$("pdfHelp").textContent=pageCount+"ページ";
     $("pageNav").classList.toggle("hidden",pageCount<2);mmPerPx=drawingScale*(25.4/72)/BASE_SCALE;fitOnNextRender=true;
     await renderPdf();setSectionOpen("drawingSection",false);setSectionOpen("scaleSection",true);status(file.name+" を読み込みました（全体表示）");
@@ -209,6 +210,16 @@ function renderRange(){
   selectionLayer.innerHTML="";if(!range)return;
   const r=rectangle(range.start,range.current),el=document.createElement("div");el.className="marquee";
   Object.assign(el.style,{left:r.left*zoom+"px",top:r.top*zoom+"px",width:(r.right-r.left)*zoom+"px",height:(r.bottom-r.top)*zoom+"px"});selectionLayer.appendChild(el);
+}
+function seriesCount(data){return Math.min(100,Math.max(1,Math.round(Math.abs(data.current.x-data.start.x)/data.w)+1))}
+function renderSeries(){
+  selectionLayer.innerHTML="";if(!series)return;
+  const count=seriesCount(series),direction=series.current.x>=series.start.x?1:-1;
+  for(let i=0;i<count;i++){
+    const el=document.createElement("div");el.className="series-preview";
+    Object.assign(el.style,{left:(series.start.x-series.w/2+i*direction*series.w)*zoom+"px",top:(series.start.y-series.d/2)*zoom+"px",width:series.w*zoom+"px",height:series.d*zoom+"px",borderColor:COLORS[series.span]});selectionLayer.appendChild(el);
+  }
+  status(count+"区画を連続配置します");
 }
 function selectBlocks(ids){
   selectedIds=new Set(ids.filter(id=>blocks.some(b=>b.id===id)));selectedId=[...selectedIds].at(-1)??null;renderBlocks();updateSelectionEditor();
@@ -301,7 +312,44 @@ function applyPanelState(){
   $("summaryToggle").title=panelCollapsed?"選択・概算数量を開く":"選択・概算数量を閉じる";
 }
 function download(name,content,type){
-  const url=URL.createObjectURL(new Blob([content],{type})),a=document.createElement("a");a.href=url;a.download=name;a.click();URL.revokeObjectURL(url);
+  downloadBlob(name,new Blob([content],{type}));
+}
+function downloadBlob(name,blob){
+  const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function applyProjectData(data){
+  if(!Array.isArray(data.blocks))throw new Error("配置データがありません");
+  history=[...history,structuredClone(blocks)];blocks=data.blocks.map(normalizeBlock);
+  if(Number.isFinite(data.mmPerPx))mmPerPx=data.mmPerPx;
+  if(Number.isFinite(data.drawingScale)){drawingScale=data.drawingScale;$("drawingScale").value=drawingScale}
+  if(Number.isFinite(data.defaultFL)){defaultFL=data.defaultFL;$("defaultFL").value=defaultFL}
+  if(Number.isFinite(data.defaultBaseHeight)){defaultBaseHeight=data.defaultBaseHeight;$("defaultBaseHeight").value=defaultBaseHeight}
+  if(Number.isFinite(data.defaultFloorCount)){defaultFloorCount=Math.max(1,Math.round(data.defaultFloorCount));$("defaultFloorCount").value=defaultFloorCount}
+  if(typeof data.panelCollapsed==="boolean")panelCollapsed=data.panelCollapsed;
+  selectBlocks([]);applyPanelState();updateDefaultHeightPreview();saveLocal();renderBlocks();updateSummary();
+}
+async function saveProjectZip(){
+  try{
+    if(!window.JSZip)throw new Error("ZIP機能を読み込めませんでした");status("PDFと配置データをZIPへ保存しています…");
+    const zip=new window.JSZip(),safePdfName=(pdfSourceName||"drawing.pdf").replace(/[\\/:*?"<>|]/g,"_"),pdfPath=pdfSourceBytes?"drawing/"+safePdfName:null;
+    const data={version:4,blocks,mmPerPx,drawingScale,defaultFL,defaultBaseHeight,defaultFloorCount,panelCollapsed,pageNumber,savedAt:new Date().toISOString(),pdf:pdfPath?{name:pdfSourceName,path:pdfPath,pageNumber}:null};
+    zip.file("project.json",JSON.stringify(data,null,2));if(pdfPath)zip.file(pdfPath,pdfSourceBytes,{binary:true,compression:"STORE"});
+    const blob=await zip.generateAsync({type:"blob",compression:"DEFLATE",compressionOptions:{level:6}});downloadBlob("足場拾いプロジェクト.zip",blob);
+    status(pdfPath?"PDFを含むプロジェクトZIPを保存しました":"配置データをプロジェクトZIPへ保存しました（PDF未読込）");
+  }catch(error){console.error(error);status("ZIPを保存できませんでした")}
+}
+async function loadProjectFile(file){
+  const isZip=file.name.toLowerCase().endsWith(".zip")||file.type.includes("zip");
+  if(!isZip){applyProjectData(JSON.parse(await file.text()));status("従来のJSON配置データを読み込みました");return}
+  if(!window.JSZip)throw new Error("ZIP機能を読み込めませんでした");status("プロジェクトZIPを読み込んでいます…");
+  const zip=await window.JSZip.loadAsync(file),projectEntry=zip.file("project.json")||Object.values(zip.files).find(entry=>!entry.dir&&entry.name.toLowerCase().endsWith(".json"));
+  if(!projectEntry)throw new Error("project.jsonがありません");const data=JSON.parse(await projectEntry.async("text"));applyProjectData(data);
+  const pdfEntry=(data.pdf?.path&&zip.file(data.pdf.path))||Object.values(zip.files).find(entry=>!entry.dir&&entry.name.toLowerCase().endsWith(".pdf"));
+  if(pdfEntry){
+    const bytes=await pdfEntry.async("uint8array"),name=data.pdf?.name||pdfEntry.name.split("/").at(-1)||"drawing.pdf";await loadPdf(new File([bytes],name,{type:"application/pdf"}));
+    if(Number.isFinite(data.mmPerPx))mmPerPx=data.mmPerPx;pageNumber=Math.max(1,Math.min(pageCount,Math.round(data.pdf?.pageNumber||data.pageNumber||1)));if(pageNumber!==1)await renderPdf();renderBlocks();updateSummary();
+  }
+  status(pdfEntry?"PDFと足場配置を復元しました":"足場配置を復元しました（ZIP内にPDFはありません）");
 }
 function removeSelected(){
   if(!selectedIds.size)return;
@@ -343,6 +391,13 @@ canvasScroll.addEventListener("pointerup",stopPan);canvasScroll.addEventListener
 
 stage.addEventListener("contextmenu",e=>e.preventDefault());
 stage.addEventListener("pointerdown",e=>{
+  if(e.button===2&&tool==="add"){
+    e.preventDefault();const p=point(e),firstHeight=defaultFL-defaultBaseHeight;
+    if(firstHeight<=0){status("1段目作業床FLは設置面高さより大きくしてください");return}
+    if(placementStair&&(span!==1829||defaultFloorCount<2)){status("階段は1829スパン・作業床2層以上で配置してください");return}
+    series={start:p,current:p,w:span/mmPerPx,d:width/mmPerPx,span,width,firstFloorFL:defaultFL,floorCount:defaultFloorCount,baseHeight:defaultBaseHeight,hasStair:placementStair};
+    stage.classList.add("series-placing");stage.setPointerCapture(e.pointerId);renderSeries();return;
+  }
   if(e.button!==2&&!(e.button===0&&e.shiftKey))return;e.preventDefault();setTool("select");const p=point(e);range={start:p,current:p};
   stage.classList.add("range-selecting");stage.setPointerCapture(e.pointerId);renderRange();
 });
@@ -363,7 +418,7 @@ stage.addEventListener("click",e=>{
   const result=snapBlock(raw),b=result.block;commit([...blocks,b]);selectBlock(b.id);status(result.snapped?"支柱位置に吸着して配置しました":span+"mmスパンを配置しました");
 });
 stage.addEventListener("pointermove",e=>{
-  const p=point(e);if(range){range.current=p;renderRange();return}if(!drag)return;
+  const p=point(e);if(series){series.current=p;renderSeries();return}if(range){range.current=p;renderRange();return}if(!drag)return;
   const dx=p.x-drag.start.x,dy=p.y-drag.start.y;
   if(drag.ids.length===1){
     const id=drag.ids[0],moving=blocks.find(b=>b.id===id),origin=drag.origins.get(id);if(!moving||!origin)return;
@@ -375,6 +430,17 @@ stage.addEventListener("pointermove",e=>{
   renderBlocks();updateSummary();
 });
 stage.addEventListener("pointerup",e=>{
+  if(series){
+    series.current=point(e);const count=seriesCount(series),direction=series.current.x>=series.start.x?1:-1;
+    const raw={id:uid(),x:Math.max(0,series.start.x-series.w/2),y:Math.max(0,series.start.y-series.d/2),span:series.span,width:series.width,firstFloorFL:series.firstFloorFL,floorCount:series.floorCount,baseHeight:series.baseHeight,rotation:0,outerProtection:"handrail",innerProtection:"handrail",hasStair:series.hasStair};
+    const first=snapBlock(raw).block,created=[];
+    for(let i=0;i<count;i++){
+      const candidate={...first,id:i===0?first.id:uid(),x:Math.max(0,first.x+i*direction*series.w)};
+      if([...blocks,...created].some(other=>overlapArea(candidate,other)>1))continue;created.push(candidate);
+    }
+    series=null;stage.classList.remove("series-placing");selectionLayer.innerHTML="";
+    if(created.length){commit([...blocks,...created]);selectBlocks(created.map(b=>b.id));status(created.length+"区画を横方向へ連続配置しました")}else status("重なる位置には配置できません");
+  }
   if(range){
     range.current=point(e);const r=rectangle(range.start,range.current);
     const ids=blocks.filter(b=>{const d=dimensions(b);return b.x+d.w>=r.left&&b.x<=r.right&&b.y+d.h>=r.top&&b.y<=r.bottom}).map(b=>b.id);
@@ -382,7 +448,7 @@ stage.addEventListener("pointerup",e=>{
   }
   if(drag){drag=null;saveLocal();updateSelectionEditor()}
 });
-stage.addEventListener("pointercancel",()=>{drag=null;range=null;stage.classList.remove("range-selecting");renderRange()});
+stage.addEventListener("pointercancel",()=>{drag=null;range=null;series=null;stage.classList.remove("range-selecting","series-placing");selectionLayer.innerHTML=""});
 
 $("zoomOut").onclick=()=>applyZoom(zoom-.15);$("zoomIn").onclick=()=>applyZoom(zoom+.15);
 $("undo").onclick=()=>{const prev=history.at(-1);if(!prev)return;future=[structuredClone(blocks),...future];blocks=prev.map(normalizeBlock);history=history.slice(0,-1);selectBlocks([]);saveLocal();renderBlocks();updateSummary()};
@@ -407,8 +473,8 @@ document.addEventListener("keydown",e=>{
   e.preventDefault();
   removeSelected();
 });
-$("saveProject").onclick=()=>{download("足場拾いデータ.json",JSON.stringify({version:3,blocks,mmPerPx,drawingScale,savedAt:new Date().toISOString()},null,2),"application/json");status("作業データを保存しました")};
-$("projectInput").onchange=async e=>{try{const data=JSON.parse(await e.target.files[0].text());if(!Array.isArray(data.blocks))throw new Error();history=[...history,structuredClone(blocks)];blocks=data.blocks.map(normalizeBlock);mmPerPx=data.mmPerPx||mmPerPx;drawingScale=data.drawingScale||drawingScale;$("drawingScale").value=drawingScale;selectBlocks([]);saveLocal();renderBlocks();updateSummary();status("作業データを読み込みました")}catch{status("作業データを読み込めませんでした")}};
+$("saveProject").onclick=saveProjectZip;
+$("projectInput").onchange=async e=>{const file=e.target.files[0];if(!file)return;try{await loadProjectFile(file)}catch(error){console.error(error);status("プロジェクトデータを読み込めませんでした")}finally{e.target.value=""}};
 $("csv").onclick=()=>{const rows=[["部材名","規格・条件","数量","単位"],...quantities().map(r=>r[4]==="group"?[r[0],r[1],"",""]:r.slice(0,4))],csv="\ufeff"+rows.map(r=>r.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(",")).join("\r\n");download("足場概算数量.csv",csv,"text/csv;charset=utf-8")};
 $("print").onclick=()=>window.print();
 
