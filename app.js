@@ -9,9 +9,10 @@ const columnPlanCache=new Map();
 let blocks=[],history=[],future=[],selectedId=null,selectedIds=new Set(),tool="add";
 let span=1829,width=610,defaultFL=7600,defaultBaseHeight=0,drawingScale=100,mmPerPx=28.222,zoom=1;
 let pdfDoc=null,pageNumber=1,pageCount=0,baseStage={width:1120,height:760};
-let calibrationPoints=[],drag=null,range=null,renderTask=null,fitOnNextRender=false,panelCollapsed=true,suppressNextClick=false;
+let calibrationPoints=[],drag=null,range=null,pan=null,renderTask=null,fitOnNextRender=false,panelCollapsed=true,suppressNextClick=false;
+let wheelTimer=null,pendingWheelZoom=null,wheelAnchor=null;
 
-const stage=$("stage"),layer=$("blocksLayer"),postsLayer=$("postsLayer"),selectionLayer=$("selectionLayer"),calLayer=$("calibrationLayer"),canvas=$("pdfCanvas");
+const stage=$("stage"),layer=$("blocksLayer"),postsLayer=$("postsLayer"),selectionLayer=$("selectionLayer"),calLayer=$("calibrationLayer"),canvas=$("pdfCanvas"),canvasScroll=$("canvasScroll");
 const uid=()=>Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,8);
 const status=message=>{$("status").textContent=message;$("ratio").textContent=mmPerPx.toFixed(2)+" mm / px"};
 const scaffoldHeight=b=>Math.max(0,Number(b.fl??b.height??0)-Number(b.baseHeight??0));
@@ -20,6 +21,11 @@ const normalizeBlock=b=>{
   return{...b,fl,baseHeight,height:Math.max(0,fl-baseHeight)};
 };
 const saveLocal=()=>localStorage.setItem(KEY,JSON.stringify({blocks,mmPerPx,drawingScale,defaultFL,defaultBaseHeight,panelCollapsed}));
+const setSectionOpen=(id,open)=>{
+  const section=$(id);if(!section)return;
+  section.classList.toggle("open",open);const toggle=section.querySelector(".section-toggle"),mark=section.querySelector(".section-chevron");
+  toggle?.setAttribute("aria-expanded",String(open));if(mark)mark.textContent=open?"−":"＋";
+};
 const setTool=next=>{
   tool=next;stage.classList.remove("tool-add","tool-select","tool-calibrate");stage.classList.add("tool-"+next);
   $("selectMode").classList.toggle("active",next==="select");$("placeMode").classList.toggle("active",next==="add");
@@ -106,7 +112,7 @@ async function loadPdf(file){
     pdfDoc=await pdfjsLib.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
     pageCount=pdfDoc.numPages;pageNumber=1;$("pdfName").textContent=file.name;$("pdfHelp").textContent=pageCount+"ページ";
     $("pageNav").classList.toggle("hidden",pageCount<2);mmPerPx=drawingScale*(25.4/72)/BASE_SCALE;fitOnNextRender=true;
-    await renderPdf();status(file.name+" を読み込みました（全体表示）");
+    await renderPdf();setSectionOpen("drawingSection",false);setSectionOpen("scaleSection",true);status(file.name+" を読み込みました（全体表示）");
   }catch(error){console.error(error);status("PDFを読み込めませんでした。別のPDFでお試しください")}
 }
 async function renderPdf(){
@@ -122,7 +128,8 @@ async function renderPdf(){
   const ratio=window.devicePixelRatio||1,ctx=canvas.getContext("2d");
   canvas.width=Math.floor(view.width*ratio);canvas.height=Math.floor(view.height*ratio);
   canvas.style.width=view.width+"px";canvas.style.height=view.height+"px";ctx.setTransform(ratio,0,0,ratio,0,0);
-  renderTask=page.render({canvasContext:ctx,viewport:view});await renderTask.promise;
+  renderTask=page.render({canvasContext:ctx,viewport:view});
+  try{await renderTask.promise}catch(error){if(error?.name==="RenderingCancelledException")return;throw error}
   canvas.classList.add("visible");$("emptyPlan").classList.add("hidden");$("pageLabel").textContent=pageNumber+" / "+pageCount;
 }
 async function fitToView(){
@@ -132,6 +139,13 @@ async function fitToView(){
 }
 function setStageSize(){
   stage.style.width=baseStage.width*zoom+"px";stage.style.height=baseStage.height*zoom+"px";renderBlocks();renderCalibration();
+}
+async function applyZoom(nextZoom,anchor=null){
+  const next=Math.max(.35,Math.min(2.5,+nextZoom.toFixed(2)));if(next===zoom)return;
+  const rect=canvasScroll.getBoundingClientRect(),localX=anchor?anchor.clientX-rect.left:canvasScroll.clientWidth/2,localY=anchor?anchor.clientY-rect.top:canvasScroll.clientHeight/2;
+  const contentX=canvasScroll.scrollLeft+localX,contentY=canvasScroll.scrollTop+localY,previous=zoom;zoom=next;
+  $("zoomLabel").textContent=Math.round(zoom*100)+"%";pdfDoc?await renderPdf():setStageSize();
+  const factor=zoom/previous;canvasScroll.scrollLeft=Math.max(0,contentX*factor-localX);canvasScroll.scrollTop=Math.max(0,contentY*factor-localY);
 }
 function renderBlocks(){
   layer.innerHTML="";
@@ -242,6 +256,22 @@ $("scaffoldWidth").onchange=e=>width=Number(e.target.value);
 $("defaultFL").oninput=updateDefaultHeightPreview;$("defaultBaseHeight").oninput=updateDefaultHeightPreview;
 $("addMode").onclick=$("placeMode").onclick=()=>setTool("add");$("selectMode").onclick=()=>setTool("select");$("fitView").onclick=fitToView;
 $("summaryToggle").onclick=()=>{panelCollapsed=!panelCollapsed;applyPanelState();saveLocal()};
+document.querySelectorAll(".section-toggle").forEach(toggle=>toggle.addEventListener("click",()=>setSectionOpen(toggle.closest(".setup-section").id,toggle.getAttribute("aria-expanded")!=="true")));
+
+canvasScroll.addEventListener("wheel",event=>{
+  event.preventDefault();wheelAnchor={clientX:event.clientX,clientY:event.clientY};
+  pendingWheelZoom=Math.max(.35,Math.min(2.5,(pendingWheelZoom??zoom)+(event.deltaY<0?.12:-.12)));
+  clearTimeout(wheelTimer);wheelTimer=setTimeout(()=>{const next=pendingWheelZoom,anchor=wheelAnchor;pendingWheelZoom=null;wheelAnchor=null;applyZoom(next,anchor)},45);
+},{passive:false});
+canvasScroll.addEventListener("pointerdown",event=>{
+  if(event.button!==1)return;event.preventDefault();pan={pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,left:canvasScroll.scrollLeft,top:canvasScroll.scrollTop};
+  canvasScroll.classList.add("is-panning");canvasScroll.setPointerCapture(event.pointerId);
+});
+canvasScroll.addEventListener("pointermove",event=>{
+  if(!pan||event.pointerId!==pan.pointerId)return;event.preventDefault();canvasScroll.scrollLeft=pan.left-(event.clientX-pan.startX);canvasScroll.scrollTop=pan.top-(event.clientY-pan.startY);
+});
+const stopPan=event=>{if(!pan||event.pointerId!==pan.pointerId)return;pan=null;canvasScroll.classList.remove("is-panning")};
+canvasScroll.addEventListener("pointerup",stopPan);canvasScroll.addEventListener("pointercancel",stopPan);canvasScroll.addEventListener("auxclick",event=>{if(event.button===1)event.preventDefault()});
 
 stage.addEventListener("contextmenu",e=>e.preventDefault());
 stage.addEventListener("pointerdown",e=>{
@@ -285,8 +315,7 @@ stage.addEventListener("pointerup",e=>{
 });
 stage.addEventListener("pointercancel",()=>{drag=null;range=null;stage.classList.remove("range-selecting");renderRange()});
 
-$("zoomOut").onclick=async()=>{zoom=Math.max(.35,+(zoom-.15).toFixed(2));$("zoomLabel").textContent=Math.round(zoom*100)+"%";pdfDoc?await renderPdf():setStageSize()};
-$("zoomIn").onclick=async()=>{zoom=Math.min(2.5,+(zoom+.15).toFixed(2));$("zoomLabel").textContent=Math.round(zoom*100)+"%";pdfDoc?await renderPdf():setStageSize()};
+$("zoomOut").onclick=()=>applyZoom(zoom-.15);$("zoomIn").onclick=()=>applyZoom(zoom+.15);
 $("undo").onclick=()=>{const prev=history.at(-1);if(!prev)return;future=[structuredClone(blocks),...future];blocks=prev.map(normalizeBlock);history=history.slice(0,-1);selectBlocks([]);saveLocal();renderBlocks();updateSummary()};
 $("redo").onclick=()=>{const next=future[0];if(!next)return;history=[...history,structuredClone(blocks)];blocks=next.map(normalizeBlock);future=future.slice(1);selectBlocks([]);saveLocal();renderBlocks();updateSummary()};
 $("selectedFL").onchange=e=>applyElevationChange("fl",e.target.value);
