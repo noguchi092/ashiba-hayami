@@ -215,16 +215,19 @@ function selectBlocks(ids){
 }
 function selectBlock(id){selectBlocks(id?[id]:[])}
 function renderSelectionSection(selected){
-  const items=[...(Array.isArray(selected)?selected:[selected])].sort((a,b)=>(a.rotation===0?a.x:a.y)-(b.rotation===0?b.x:b.y));
-  const preview=$("selectionSectionView"),totalSpan=items.reduce((sum,b)=>sum+Number(b.span),0);
+  const sourceItems=[...(Array.isArray(selected)?selected:[selected])];
+  const bounds=sourceItems.map(block=>{const size=dimensions(block);return{block,left:block.x,top:block.y,right:block.x+size.w,bottom:block.y+size.h}}),extentX=Math.max(...bounds.map(v=>v.right))-Math.min(...bounds.map(v=>v.left)),extentY=Math.max(...bounds.map(v=>v.bottom))-Math.min(...bounds.map(v=>v.top)),sectionAxis=extentX>=extentY?"x":"y";
+  const sectionLength=block=>sectionAxis==="x"?(block.rotation===0?Number(block.span):Number(block.width)):(block.rotation===0?Number(block.width):Number(block.span));
+  const items=sourceItems.sort((a,b)=>(sectionAxis==="x"?a.x:a.y)-(sectionAxis==="x"?b.x:b.y));
+  const preview=$("selectionSectionView"),totalSpan=items.reduce((sum,b)=>sum+sectionLength(b),0);
   const floorLevels=[...new Set(items.flatMap(block=>workFloorHeights(block).map(height=>Number(block.baseHeight||0)+height)))].sort((a,b)=>a-b);
   const minBase=Math.min(...items.map(block=>Number(block.baseHeight||0))),upperLevels=items.map(block=>Number(block.fl)+900),maxUpper=Math.max(...upperLevels,minBase+1);
   const bottom=138,top=20,left=92,right=252,usable=bottom-top,yAtFL=level=>bottom-((level-minBase)/(maxUpper-minBase))*usable;let cursor=left;
   const bays=items.map((block,index)=>{
-    const x1=cursor,x2=index===items.length-1?right:cursor+(right-left)*block.span/totalSpan;cursor=x2;
+    const bayLength=sectionLength(block),x1=cursor,x2=index===items.length-1?right:cursor+(right-left)*bayLength/totalSpan;cursor=x2;
     const base=Number(block.baseHeight||0),blockFloorLevels=workFloorHeights(block).map(height=>base+height);
     const floors=blockFloorLevels.map((level,floorIndex)=>{const y=yAtFL(level),r450=yAtFL(level+450),r900=yAtFL(level+900),lower=floorIndex>0?blockFloorLevels[floorIndex-1]:null;return`<line class="section-floor" x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"/><line class="section-handrail" x1="${x1}" y1="${r450}" x2="${x2}" y2="${r450}"/><line class="section-handrail" x1="${x1}" y1="${r900}" x2="${x2}" y2="${r900}"/>${block.hasStair&&lower!==null?`<line class="section-stair" x1="${x1+3}" y1="${yAtFL(lower)}" x2="${x2-3}" y2="${y}"/>`:""}`}).join("");
-    return`<line class="section-post" x1="${x1}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x1}" y2="${yAtFL(base)}"/>${index===items.length-1?`<line class="section-post" x1="${x2}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x2}" y2="${yAtFL(base)}"/>`:""}${floors}<text class="section-bay-label" x="${(x1+x2)/2}" y="151" text-anchor="middle">${block.span}</text>`;
+    return`<line class="section-post" x1="${x1}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x1}" y2="${yAtFL(base)}"/>${index===items.length-1?`<line class="section-post" x1="${x2}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x2}" y2="${yAtFL(base)}"/>`:""}${floors}<text class="section-bay-label" x="${(x1+x2)/2}" y="151" text-anchor="middle">${bayLength}</text>`;
   }).join("");
   const floorDimensions=floorLevels.map(level=>{const y=yAtFL(level);return`<line class="section-extension" x1="72" y1="${y}" x2="${left-3}" y2="${y}"/><line class="section-level-tick" x1="69" y1="${y}" x2="75" y2="${y}"/><text class="section-level-label" x="66" y="${y+3}" text-anchor="end">作業床 FL ${level.toLocaleString()}</text>`}).join("");
   const topLevel=Math.max(...upperLevels),topY=yAtFL(topLevel),baseY=yAtFL(minBase);
