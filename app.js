@@ -225,7 +225,7 @@ function renderSelectionSection(block){
     ${floors}<path class="section-jack" d="M55 134h14l-7-6zm126 0h14l-7-6z"/>
     <line class="section-dimension" x1="${left}" y1="148" x2="${right}" y2="148"/><path class="section-arrow" d="M62 148l6-3v6zm126 0l-6-3v6z"/>
     <text class="section-width" x="125" y="160" text-anchor="middle">長手 ${block.span.toLocaleString()} mm</text>
-    <text class="section-height" x="250" y="78" text-anchor="middle" transform="rotate(-90 250 78)">最上段 ${height.toLocaleString()} mm</text>
+    <text class="section-height" x="250" y="78" text-anchor="middle" transform="rotate(-90 250 78)">上部 FL ${(Number(block.fl)+900).toLocaleString()} mm</text>
     <text class="section-badge" x="198" y="14">作業床 ${floorHeights.length}層</text>
     <text class="section-note" x="198" y="26">1段目 ${lowest.toLocaleString()} mm</text>
   </svg>`;
@@ -241,8 +241,8 @@ function updateSelectionEditor(){
   $("selectedFL").value=same("firstFloorFL")?first.firstFloorFL:"";$("selectedFL").placeholder=same("firstFloorFL")?"":"複数";
   $("selectedBaseHeight").value=same("baseHeight")?first.baseHeight:"";$("selectedBaseHeight").placeholder=same("baseHeight")?"":"複数";
   $("selectedFloorCount").value=same("floorCount")?first.floorCount:"";$("selectedFloorCount").placeholder=same("floorCount")?"":"複数";
-  const firstHeights=selected.map(firstFloorHeight),sameFirst=firstHeights.every(v=>v===firstHeights[0]);
-  $("selectedActualHeight").textContent=sameFirst?firstHeights[0].toLocaleString()+" mm":"複数";
+  const upperLevels=selected.map(b=>Number(b.fl)+900),sameUpper=upperLevels.every(v=>v===upperLevels[0]);
+  $("selectedActualHeight").textContent=sameUpper?"FL "+upperLevels[0].toLocaleString()+" mm":"複数";
   const tops=selected.map(scaffoldHeight),floorCounts=selected.map(floorCountOf);
   $("selectedLevels").textContent=tops.every(v=>v===tops[0])&&floorCounts.every(v=>v===floorCounts[0])?floorCounts[0]+"層（最上段"+tops[0].toLocaleString()+"mm）":"複数";
 }
@@ -276,8 +276,8 @@ function quantities(){
 }
 function updateDefaultHeightPreview(){
   defaultFL=Number($("defaultFL").value||0);defaultBaseHeight=Number($("defaultBaseHeight").value||0);defaultFloorCount=Math.max(1,Math.round(Number($("defaultFloorCount").value)||1));
-  $("defaultFloorCount").value=defaultFloorCount;const first=Math.max(0,defaultFL-defaultBaseHeight),top=first+(defaultFloorCount-1)*1900;
-  $("defaultActualHeight").textContent=defaultFloorCount===1?first.toLocaleString()+" mm":first.toLocaleString()+" → "+top.toLocaleString()+" mm";$("addMode").disabled=first<=0;saveLocal();
+  $("defaultFloorCount").value=defaultFloorCount;const first=Math.max(0,defaultFL-defaultBaseHeight),upperLevel=defaultFL+(defaultFloorCount-1)*1900+900;
+  $("defaultActualHeight").textContent="FL "+upperLevel.toLocaleString()+" mm";$("addMode").disabled=first<=0;saveLocal();
 }
 function applyDefaultLevelToAll(){
   const first=defaultFL-defaultBaseHeight;if(!blocks.length||first<=0)return;
