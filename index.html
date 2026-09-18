@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="PDF図面上にIQ足場を配置し、基本部材の概算数量を拾えるツールです。">
   <title>簡易足場拾い｜IQ足場の概算数量</title>
-  <link rel="stylesheet" href="./style.css?v=17">
+  <link rel="stylesheet" href="./style.css?v=18">
 </head>
 <body>
   <header class="topbar">
     <div class="brand-mark">▦</div>
     <div class="brand"><h1>簡易足場拾い</h1><span>IQ足場・概算検討版</span></div>
     <div class="top-actions">
-      <label class="btn secondary">データ読込<input id="projectInput" type="file" accept=".json" hidden></label>
-      <button class="btn secondary" id="saveProject">保存</button>
+      <label class="btn secondary">データ読込<input id="projectInput" type="file" accept=".zip,.json,application/zip,application/json" hidden></label>
+      <button class="btn secondary" id="saveProject" title="PDFと配置データをZIPで保存">ZIP保存</button>
       <button class="btn primary" id="print">PDF出力</button>
     </div>
   </header>
@@ -83,7 +83,7 @@
 
     <section class="drawing-area">
       <div class="toolbar">
-        <div><button class="tool" id="selectMode">↖ 選択</button><button class="tool active" id="placeMode">▭ 足場配置</button><span class="range-help">右ドラッグ：範囲選択</span></div>
+        <div><button class="tool" id="selectMode">↖ 選択</button><button class="tool active" id="placeMode">▭ 足場配置</button><span class="range-help">配置中の右ドラッグ：連続配置／選択中：範囲選択</span></div>
         <div class="view-tools"><button class="icon-btn" id="undo" title="元に戻す">↶</button><button class="icon-btn" id="redo" title="やり直す">↷</button><i></i><button class="fit-btn" id="fitView">全体表示</button><button class="zoom-btn" id="zoomOut" title="縮小">−</button><span id="zoomLabel">100%</span><button class="zoom-btn zoom-in" id="zoomIn" title="拡大">＋</button></div>
       </div>
       <div class="canvas-scroll" id="canvasScroll" title="ホイールで拡大縮小・ホイール押し込みドラッグで移動">
@@ -141,6 +141,7 @@
     <div><strong>簡易足場拾い</strong><span>© 2026 タイマイオンザライス</span></div>
     <nav><a href="./operator.html">運営者情報</a><a href="./privacy.html">プライバシーポリシー</a></nav>
   </footer>
-  <script type="module" src="./app.js?v=23"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script type="module" src="./app.js?v=24"></script>
 </body>
 </html>
