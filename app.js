@@ -20,7 +20,7 @@ const normalizeBlock=b=>{
   const baseHeight=Number(b.baseHeight??0),fl=Number(b.fl??(Number(b.height??7600)+baseHeight));
   return{...b,fl,baseHeight,height:Math.max(0,fl-baseHeight)};
 };
-const saveLocal=()=>localStorage.setItem(KEY,JSON.stringify({blocks,mmPerPx,drawingScale,defaultFL,defaultBaseHeight,panelCollapsed}));
+const saveLocal=()=>localStorage.setItem(KEY,JSON.stringify({blocks,mmPerPx,drawingScale,defaultFL,defaultBaseHeight,panelCollapsed,levelSettingsApplyAll:true}));
 const setSectionOpen=(id,open)=>{
   const section=$(id);if(!section)return;
   section.classList.toggle("open",open);const toggle=section.querySelector(".section-toggle"),mark=section.querySelector(".section-chevron");
@@ -72,24 +72,36 @@ function solveColumn(rawHeight){
     const jack=height-lower-regularTotal;
     if(jack>=45&&jack<=345)candidates.push({lower,regular,jack,pieces:regular.length+1,standard:regular.filter(v=>v===1900).length});
   }));
-  candidates.sort((a,b)=>a.pieces-b.pieces||Math.abs(a.jack-150)-Math.abs(b.jack-150)||b.standard-a.standard||b.lower-a.lower);
+  candidates.sort((a,b)=>a.pieces-b.pieces||b.lower-a.lower||b.standard-a.standard||Math.abs(a.jack-150)-Math.abs(b.jack-150));
   const result=candidates[0]||null;columnPlanCache.set(height,result);return result;
 }
 
 function verticalBreakdown(posts){
-  const lower=new Map(),regular=new Map(),jacks=new Map();let unresolved=0;
+  const lower=new Map(),regular=new Map();let unresolved=0;
   posts.forEach(post=>{
     const plan=solveColumn(post.height);if(!plan){unresolved++;return}
     lower.set(plan.lower,(lower.get(plan.lower)||0)+1);
     plan.regular.forEach(size=>regular.set(size,(regular.get(size)||0)+1));
-    jacks.set(plan.jack,(jacks.get(plan.jack)||0)+1);
   });
   const rows=[];
-  [...lower].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["下部支柱 "+size,"最下段・IQ系",count,"本"]));
-  [...regular].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["支柱 "+size,"通常支柱・IQ系",count,"本"]));
-  [...jacks].sort((a,b)=>a[0]-b[0]).forEach(([length,count])=>rows.push(["ジャッキベース","AJP・使用長 "+length+"mm",count,"本"]));
+  [...lower].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["下部支柱 "+size,"IQ下部支柱",count,"本"]));
+  [...regular].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["支柱 "+size,"IQ支柱",count,"本"]));
+  rows.push(["ジャッキベース","AJP・標準（ロング不使用）",posts.length,"本"]);
   if(unresolved)rows.push(["支柱構成 要確認","規格内で構成できない高さ",unresolved,"箇所"]);
   return rows;
+}
+
+function connectedBlockGroups(){
+  const remaining=new Set(blocks.map(b=>b.id)),groups=[];
+  while(remaining.size){
+    const first=remaining.values().next().value,queue=[first],group=[];remaining.delete(first);
+    while(queue.length){
+      const id=queue.shift(),block=blocks.find(b=>b.id===id);if(!block)continue;group.push(block);
+      blocks.forEach(other=>{if(!remaining.has(other.id))return;const touches=corners(block).some(a=>corners(other).some(b=>Math.hypot(a[0]-b[0],a[1]-b[1])<.01));if(touches){remaining.delete(other.id);queue.push(other.id)}});
+    }
+    groups.push(group);
+  }
+  return groups;
 }
 const overlapArea=(a,b)=>{
   const ad=dimensions(a),bd=dimensions(b);
@@ -202,31 +214,32 @@ function updateSummary(){
   const length=blocks.reduce((s,b)=>s+b.span,0)/1000,area=blocks.reduce((s,b)=>s+b.span/1000*scaffoldHeight(b)/1000,0);
   $("metricCount").textContent=blocks.length;$("metricLength").textContent=length.toFixed(1);$("metricArea").textContent=area.toFixed(1);
   const rows=quantities();$("csv").disabled=!rows.length;
-  $("quantityBody").innerHTML=rows.length?rows.map(r=>`<tr><td>${r[0]}<small>${r[1]}</small></td><td><strong>${r[2].toLocaleString()}</strong> ${r[3]}</td></tr>`).join(""):'<tr><td colspan="2" class="zero">足場を配置すると集計します</td></tr>';
+  $("quantityBody").innerHTML=rows.length?rows.map(r=>r[4]==="group"?`<tr class="quantity-group"><th colspan="2">${r[0]}${r[1]?`<small>${r[1]}</small>`:""}</th></tr>`:`<tr><td>${r[0]}<small>${r[1]}</small></td><td><strong>${r[2].toLocaleString()}</strong> ${r[3]}</td></tr>`).join(""):'<tr><td colspan="2" class="zero">足場を配置すると集計します</td></tr>';
 }
 function quantities(){
   if(!blocks.length)return[];
   const levels=b=>Math.max(0,Math.ceil(scaffoldHeight(b)/1900)),posts=uniquePostPositions(),postCount=posts.length;
-  const length=blocks.reduce((s,b)=>s+b.span,0)/1000,maxHeight=Math.max(...blocks.map(scaffoldHeight))/1000;
-  const spanTotals=new Map(),widthTotals=new Map(),deckTotals=new Map();
+  const rootTotals=new Map(),workHandrails=new Map(),deckTotals=new Map();
   blocks.forEach(b=>{
-    const count=levels(b);spanTotals.set(b.span,(spanTotals.get(b.span)||0)+count);widthTotals.set(b.width,(widthTotals.get(b.width)||0)+count*2);
-    const deckKey=b.span+"×500";deckTotals.set(deckKey,(deckTotals.get(deckKey)||0)+count*Math.max(1,Math.ceil(b.width/500)));
+    const count=levels(b);rootTotals.set(b.span,(rootTotals.get(b.span)||0)+2);workHandrails.set(b.span,(workHandrails.get(b.span)||0)+count*2);
+    const boardWidths=b.width<=610?[490]:b.width<=914?[490,240]:[490,490];
+    boardWidths.forEach(boardWidth=>{const key=b.span+"×"+boardWidth;deckTotals.set(key,(deckTotals.get(key)||0)+count)});
   });
-  const rows=[["支柱位置","共有支柱を重複除外",postCount,"箇所"],...verticalBreakdown(posts)];
-  [...spanTotals].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>{
-    rows.push(["布材 "+size,"スパン別・各段1本",count,"本"]);
-    rows.push(["IQ手すり "+size,"内側・各段1本",count,"本"]);
-    rows.push(["IQ先行手すり "+size,"外側・各段1枚",count,"枚"]);
-    rows.push(["幅木 "+size,"外側・スパン別",count,"枚"]);
-  });
-  [...widthTotals].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["腕木 "+size,"足場幅別・各段2本",count,"本"]));
-  [...deckTotals].sort((a,b)=>b[0].localeCompare(a[0],"ja",{numeric:true})).forEach(([size,count])=>rows.push(["鋼製踏板 "+size,"500幅換算",count,"枚"]));
-  rows.push(["壁つなぎ","8m×9m目安",Math.max(1,Math.ceil(length/8)*Math.ceil(maxHeight/9)),"本"]);return rows;
+  const group=(name,detail="")=>[name,detail,0,"","group"],rows=[group("支柱","支柱位置 "+postCount+"箇所"),...verticalBreakdown(posts),group("根がらみ材")];
+  [...rootTotals].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"根がらみ・両側",count,"本"]));
+  rows.push(group("作業床材"));
+  [...workHandrails].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"作業床・両側",count,"本"]));
+  [...deckTotals].sort((a,b)=>b[0].localeCompare(a[0],"ja",{numeric:true})).forEach(([size,count])=>rows.push(["布板 "+size,"Sウォーク",count,"枚"]));
+  const stairCount=connectedBlockGroups().reduce((sum,groupBlocks)=>sum+Math.max(...groupBlocks.map(levels)),0);
+  rows.push(group("昇降"),["階段 1900","IQアルミカイダン19",stairCount,"基"],["階段手すり","IQカイダンレール",stairCount,"本"]);return rows;
 }
 function updateDefaultHeightPreview(){
   defaultFL=Number($("defaultFL").value||0);defaultBaseHeight=Number($("defaultBaseHeight").value||0);
   const actual=defaultFL-defaultBaseHeight;$("defaultActualHeight").textContent=Math.max(0,actual).toLocaleString()+" mm";$("addMode").disabled=actual<=0;saveLocal();
+}
+function applyDefaultLevelToAll(){
+  const actual=defaultFL-defaultBaseHeight;if(!blocks.length||actual<=0)return;
+  commit(blocks.map(b=>({...b,fl:defaultFL,baseHeight:defaultBaseHeight,height:actual})));updateSelectionEditor();status(blocks.length+"件すべてにレベル設定を反映しました");
 }
 function applyPanelState(){
   document.querySelector(".workspace").classList.toggle("right-collapsed",panelCollapsed);$("rightPanel").classList.toggle("collapsed",panelCollapsed);
@@ -254,6 +267,7 @@ $("calibrate").onclick=()=>{calibrationPoints=[];setTool("calibrate");renderCali
 document.querySelectorAll("[data-span]").forEach(el=>el.onclick=()=>{document.querySelectorAll("[data-span]").forEach(v=>v.classList.remove("active"));el.classList.add("active");span=Number(el.dataset.span);setTool("add")});
 $("scaffoldWidth").onchange=e=>width=Number(e.target.value);
 $("defaultFL").oninput=updateDefaultHeightPreview;$("defaultBaseHeight").oninput=updateDefaultHeightPreview;
+$("defaultFL").onchange=applyDefaultLevelToAll;$("defaultBaseHeight").onchange=applyDefaultLevelToAll;
 $("addMode").onclick=$("placeMode").onclick=()=>setTool("add");$("selectMode").onclick=()=>setTool("select");$("fitView").onclick=fitToView;
 $("summaryToggle").onclick=()=>{panelCollapsed=!panelCollapsed;applyPanelState();saveLocal()};
 document.querySelectorAll(".section-toggle").forEach(toggle=>toggle.addEventListener("click",()=>setSectionOpen(toggle.closest(".setup-section").id,toggle.getAttribute("aria-expanded")!=="true")));
@@ -333,7 +347,7 @@ document.addEventListener("keydown",e=>{
 });
 $("saveProject").onclick=()=>{download("足場拾いデータ.json",JSON.stringify({version:2,blocks,mmPerPx,drawingScale,savedAt:new Date().toISOString()},null,2),"application/json");status("作業データを保存しました")};
 $("projectInput").onchange=async e=>{try{const data=JSON.parse(await e.target.files[0].text());if(!Array.isArray(data.blocks))throw new Error();history=[...history,structuredClone(blocks)];blocks=data.blocks.map(normalizeBlock);mmPerPx=data.mmPerPx||mmPerPx;drawingScale=data.drawingScale||drawingScale;$("drawingScale").value=drawingScale;selectBlocks([]);saveLocal();renderBlocks();updateSummary();status("作業データを読み込みました")}catch{status("作業データを読み込めませんでした")}};
-$("csv").onclick=()=>{const rows=[["部材名","規格・条件","数量","単位"],...quantities()],csv="\ufeff"+rows.map(r=>r.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(",")).join("\r\n");download("足場概算数量.csv",csv,"text/csv;charset=utf-8")};
+$("csv").onclick=()=>{const rows=[["部材名","規格・条件","数量","単位"],...quantities().map(r=>r[4]==="group"?[r[0],r[1],"",""]:r.slice(0,4))],csv="\ufeff"+rows.map(r=>r.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(",")).join("\r\n");download("足場概算数量.csv",csv,"text/csv;charset=utf-8")};
 $("print").onclick=()=>window.print();
 
 try{
@@ -342,6 +356,7 @@ try{
   if(data.drawingScale){drawingScale=data.drawingScale;$("drawingScale").value=drawingScale}
   if(Number.isFinite(data.defaultFL)){defaultFL=data.defaultFL;$("defaultFL").value=defaultFL}
   if(Number.isFinite(data.defaultBaseHeight)){defaultBaseHeight=data.defaultBaseHeight;$("defaultBaseHeight").value=defaultBaseHeight}
+  if(blocks.length&&data.levelSettingsApplyAll!==true){const actual=Math.max(0,defaultFL-defaultBaseHeight);blocks=blocks.map(b=>normalizeBlock({...b,fl:defaultFL,baseHeight:defaultBaseHeight,height:actual}))}
   if(typeof data.panelCollapsed==="boolean")panelCollapsed=data.panelCollapsed;if(blocks.length)status("前回の配置データを復元しました");
 }catch{localStorage.removeItem(KEY)}
 updateDefaultHeightPreview();applyPanelState();setStageSize();renderBlocks();updateSummary();updateSelectionEditor();status($("status").textContent);
