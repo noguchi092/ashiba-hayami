@@ -220,7 +220,7 @@ function renderSelectionSection(selected){
   const bottom=132,top=14,left=36,right=224,usable=bottom-top,yAt=elevation=>bottom-(elevation/maxUpper)*usable;let cursor=left;
   const bays=items.map((block,index)=>{
     const x1=cursor,x2=index===items.length-1?right:cursor+(right-left)*block.span/totalSpan;cursor=x2;
-    const floors=workFloorHeights(block).map(levelHeight=>{const y=yAt(levelHeight),r450=yAt(levelHeight+450),r900=yAt(levelHeight+900);return`<line class="section-floor" x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"/><line class="section-handrail" x1="${x1}" y1="${r450}" x2="${x2}" y2="${r450}"/><line class="section-handrail" x1="${x1}" y1="${r900}" x2="${x2}" y2="${r900}"/>${block.hasStair&&index===0?`<line class="section-stair" x1="${x1+3}" y1="${y}" x2="${x2-3}" y2="${yAt(Math.max(0,levelHeight-1900))}"/>`:""}`}).join("");
+    const blockFloors=workFloorHeights(block),floors=blockFloors.map((levelHeight,floorIndex)=>{const y=yAt(levelHeight),r450=yAt(levelHeight+450),r900=yAt(levelHeight+900),lower=floorIndex>0?blockFloors[floorIndex-1]:null;return`<line class="section-floor" x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"/><line class="section-handrail" x1="${x1}" y1="${r450}" x2="${x2}" y2="${r450}"/><line class="section-handrail" x1="${x1}" y1="${r900}" x2="${x2}" y2="${r900}"/>${block.hasStair&&lower!==null?`<line class="section-stair" x1="${x1+3}" y1="${yAt(lower)}" x2="${x2-3}" y2="${y}"/>`:""}`}).join("");
     return`<line class="section-post" x1="${x1}" y1="${yAt(scaffoldHeight(block)+900)}" x2="${x1}" y2="${bottom}"/>${index===items.length-1?`<line class="section-post" x1="${x2}" y1="${yAt(scaffoldHeight(block)+900)}" x2="${x2}" y2="${bottom}"/>`:""}${floors}<text class="section-bay-label" x="${(x1+x2)/2}" y="144" text-anchor="middle">${block.span}</text>`;
   }).join("");
   preview.innerHTML=`<svg viewBox="0 0 260 166" role="img" aria-label="長手方向 ${items.length}区画、合計${totalSpan}ミリ"><line class="section-ground" x1="24" y1="${bottom+3}" x2="236" y2="${bottom+3}"/>${bays}<text class="section-height" x="250" y="76" text-anchor="middle" transform="rotate(-90 250 76)">上部 FL ${(Math.max(...items.map(b=>Number(b.fl)))+900).toLocaleString()} mm</text><text class="section-width" x="130" y="160" text-anchor="middle">合計 ${totalSpan.toLocaleString()} mm</text><text class="section-badge" x="36" y="11">${items.length}区画・作業床最大${Math.max(...items.map(floorCountOf))}層</text></svg>`;
@@ -240,7 +240,7 @@ function updateSelectionEditor(){
   $("selectedActualHeight").textContent=sameUpper?"FL "+upperLevels[0].toLocaleString()+" mm":"複数";
   const tops=selected.map(scaffoldHeight),floorCounts=selected.map(floorCountOf);
   $("selectedLevels").textContent=tops.every(v=>v===tops[0])&&floorCounts.every(v=>v===floorCounts[0])?floorCounts[0]+"層（最上段"+tops[0].toLocaleString()+"mm）":"複数";
-  $("toggleStair").classList.toggle("hidden",selected.length!==1);if(selected.length===1){const eligible=first.span===1829&&floorCountOf(first)>1;$("toggleStair").disabled=!eligible;$("toggleStair").textContent=first.hasStair?"階段を解除":eligible?"階段を追加":"階段は1829・2層以上"}
+  const stairEligible=selected.every(b=>b.span===1829&&floorCountOf(b)>1),allStairs=stairEligible&&selected.every(b=>b.hasStair);$("toggleStair").classList.remove("hidden");$("toggleStair").disabled=!stairEligible;$("toggleStair").textContent=!stairEligible?"階段は1829・2層以上":allStairs?"選択した足場の階段を解除":"選択した足場を階段付きに変更";
 }
 function applyElevationChange(key,value){
   if(!selectedIds.size||value==="")return;const number=Number(value);
@@ -377,7 +377,7 @@ $("redo").onclick=()=>{const next=future[0];if(!next)return;history=[...history,
 $("selectedFL").onchange=e=>applyElevationChange("firstFloorFL",e.target.value);
 $("selectedBaseHeight").onchange=e=>applyElevationChange("baseHeight",e.target.value);
 $("selectedFloorCount").onchange=e=>applyElevationChange("floorCount",Math.max(1,Math.round(Number(e.target.value)||1)));
-$("toggleStair").onclick=()=>{if(selectedIds.size!==1)return;const current=selectedBlocks()[0];if(!current||current.span!==1829||floorCountOf(current)<2)return;commit(blocks.map(b=>b.id===current.id?{...b,hasStair:!b.hasStair}:b));updateSelectionEditor()};
+$("toggleStair").onclick=()=>{const selected=selectedBlocks();if(!selected.length||!selected.every(b=>b.span===1829&&floorCountOf(b)>1))return;const remove=selected.every(b=>b.hasStair);commit(blocks.map(b=>selectedIds.has(b.id)?{...b,hasStair:!remove}:b));updateSelectionEditor();status(remove?selected.length+"件の階段を解除しました":selected.length+"件を階段付き足場に変更しました")};
 $("rotate").onclick=()=>{if(!selectedIds.size)return;commit(blocks.map(b=>selectedIds.has(b.id)?{...b,rotation:b.rotation===0?90:0}:b));updateSelectionEditor()};
 $("duplicate").onclick=()=>{const copies=selectedBlocks().map(b=>({...b,id:uid(),x:b.x+18,y:b.y+18}));if(!copies.length)return;commit([...blocks,...copies]);selectBlocks(copies.map(b=>b.id))};
 $("remove").onclick=removeSelected;
