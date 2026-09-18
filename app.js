@@ -216,14 +216,20 @@ function selectBlocks(ids){
 function selectBlock(id){selectBlocks(id?[id]:[])}
 function renderSelectionSection(selected){
   const items=[...(Array.isArray(selected)?selected:[selected])].sort((a,b)=>(a.rotation===0?a.x:a.y)-(b.rotation===0?b.x:b.y));
-  const preview=$("selectionSectionView"),totalSpan=items.reduce((sum,b)=>sum+Number(b.span),0),maxUpper=Math.max(...items.map(b=>scaffoldHeight(b)+900),1);
-  const bottom=132,top=14,left=36,right=224,usable=bottom-top,yAt=elevation=>bottom-(elevation/maxUpper)*usable;let cursor=left;
+  const preview=$("selectionSectionView"),totalSpan=items.reduce((sum,b)=>sum+Number(b.span),0);
+  const floorLevels=[...new Set(items.flatMap(block=>workFloorHeights(block).map(height=>Number(block.baseHeight||0)+height)))].sort((a,b)=>a-b);
+  const minBase=Math.min(...items.map(block=>Number(block.baseHeight||0))),upperLevels=items.map(block=>Number(block.fl)+900),maxUpper=Math.max(...upperLevels,minBase+1);
+  const bottom=138,top=20,left=92,right=252,usable=bottom-top,yAtFL=level=>bottom-((level-minBase)/(maxUpper-minBase))*usable;let cursor=left;
   const bays=items.map((block,index)=>{
     const x1=cursor,x2=index===items.length-1?right:cursor+(right-left)*block.span/totalSpan;cursor=x2;
-    const blockFloors=workFloorHeights(block),floors=blockFloors.map((levelHeight,floorIndex)=>{const y=yAt(levelHeight),r450=yAt(levelHeight+450),r900=yAt(levelHeight+900),lower=floorIndex>0?blockFloors[floorIndex-1]:null;return`<line class="section-floor" x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"/><line class="section-handrail" x1="${x1}" y1="${r450}" x2="${x2}" y2="${r450}"/><line class="section-handrail" x1="${x1}" y1="${r900}" x2="${x2}" y2="${r900}"/>${block.hasStair&&lower!==null?`<line class="section-stair" x1="${x1+3}" y1="${yAt(lower)}" x2="${x2-3}" y2="${y}"/>`:""}`}).join("");
-    return`<line class="section-post" x1="${x1}" y1="${yAt(scaffoldHeight(block)+900)}" x2="${x1}" y2="${bottom}"/>${index===items.length-1?`<line class="section-post" x1="${x2}" y1="${yAt(scaffoldHeight(block)+900)}" x2="${x2}" y2="${bottom}"/>`:""}${floors}<text class="section-bay-label" x="${(x1+x2)/2}" y="144" text-anchor="middle">${block.span}</text>`;
+    const base=Number(block.baseHeight||0),blockFloorLevels=workFloorHeights(block).map(height=>base+height);
+    const floors=blockFloorLevels.map((level,floorIndex)=>{const y=yAtFL(level),r450=yAtFL(level+450),r900=yAtFL(level+900),lower=floorIndex>0?blockFloorLevels[floorIndex-1]:null;return`<line class="section-floor" x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"/><line class="section-handrail" x1="${x1}" y1="${r450}" x2="${x2}" y2="${r450}"/><line class="section-handrail" x1="${x1}" y1="${r900}" x2="${x2}" y2="${r900}"/>${block.hasStair&&lower!==null?`<line class="section-stair" x1="${x1+3}" y1="${yAtFL(lower)}" x2="${x2-3}" y2="${y}"/>`:""}`}).join("");
+    return`<line class="section-post" x1="${x1}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x1}" y2="${yAtFL(base)}"/>${index===items.length-1?`<line class="section-post" x1="${x2}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x2}" y2="${yAtFL(base)}"/>`:""}${floors}<text class="section-bay-label" x="${(x1+x2)/2}" y="151" text-anchor="middle">${block.span}</text>`;
   }).join("");
-  preview.innerHTML=`<svg viewBox="0 0 260 166" role="img" aria-label="長手方向 ${items.length}区画、合計${totalSpan}ミリ"><line class="section-ground" x1="24" y1="${bottom+3}" x2="236" y2="${bottom+3}"/>${bays}<text class="section-height" x="250" y="76" text-anchor="middle" transform="rotate(-90 250 76)">上部 FL ${(Math.max(...items.map(b=>Number(b.fl)))+900).toLocaleString()} mm</text><text class="section-width" x="130" y="160" text-anchor="middle">合計 ${totalSpan.toLocaleString()} mm</text><text class="section-badge" x="36" y="11">${items.length}区画・作業床最大${Math.max(...items.map(floorCountOf))}層</text></svg>`;
+  const floorDimensions=floorLevels.map(level=>{const y=yAtFL(level);return`<line class="section-extension" x1="72" y1="${y}" x2="${left-3}" y2="${y}"/><line class="section-level-tick" x1="69" y1="${y}" x2="75" y2="${y}"/><text class="section-level-label" x="66" y="${y+3}" text-anchor="end">作業床 FL ${level.toLocaleString()}</text>`}).join("");
+  const topLevel=Math.max(...upperLevels),topY=yAtFL(topLevel),baseY=yAtFL(minBase);
+  const svg=`<svg viewBox="0 0 340 178" role="img" aria-label="長手方向 ${items.length}区画、合計${totalSpan}ミリ。作業床レベルと足場上部レベルの寸法入り"><defs><marker id="sectionArrow" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 Z" class="section-arrow"/></marker></defs><line class="section-ground" x1="${left-10}" y1="${baseY+3}" x2="${right+10}" y2="${baseY+3}"/>${floorDimensions}${bays}<line class="section-dimension" x1="278" y1="${baseY}" x2="278" y2="${topY}" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${right+3}" y1="${topY}" x2="282" y2="${topY}"/><line class="section-extension" x1="${right+3}" y1="${baseY}" x2="282" y2="${baseY}"/><text class="section-height" x="288" y="${Math.max(18,topY+4)}">上部 FL ${topLevel.toLocaleString()} mm</text><line class="section-dimension" x1="${left}" y1="160" x2="${right}" y2="160" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${left}" y1="${baseY+3}" x2="${left}" y2="164"/><line class="section-extension" x1="${right}" y1="${baseY+3}" x2="${right}" y2="164"/><text class="section-width" x="${(left+right)/2}" y="174" text-anchor="middle">合計 ${totalSpan.toLocaleString()} mm</text><text class="section-badge" x="${left}" y="11">${items.length}区画・作業床最大${Math.max(...items.map(floorCountOf))}層</text></svg>`;
+  preview.innerHTML=svg;$("sectionModalView").innerHTML=svg;
 }
 function updateSelectionEditor(){
   const selected=selectedBlocks(),has=selected.length>0;$("selectionEmpty").classList.toggle("hidden",has);$("selectionEditor").classList.toggle("hidden",!has);
@@ -378,6 +384,11 @@ $("selectedFL").onchange=e=>applyElevationChange("firstFloorFL",e.target.value);
 $("selectedBaseHeight").onchange=e=>applyElevationChange("baseHeight",e.target.value);
 $("selectedFloorCount").onchange=e=>applyElevationChange("floorCount",Math.max(1,Math.round(Number(e.target.value)||1)));
 $("toggleStair").onclick=()=>{const selected=selectedBlocks();if(!selected.length||!selected.every(b=>b.span===1829&&floorCountOf(b)>1))return;const remove=selected.every(b=>b.hasStair);commit(blocks.map(b=>selectedIds.has(b.id)?{...b,hasStair:!remove}:b));updateSelectionEditor();status(remove?selected.length+"件の階段を解除しました":selected.length+"件を階段付き足場に変更しました")};
+const openSectionModal=()=>{if(selectedIds.size&&!$("sectionModal").open)$("sectionModal").showModal()};
+$("selectionSectionView").onclick=openSectionModal;
+$("selectionSectionView").onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openSectionModal()}};
+$("closeSectionModal").onclick=()=>$("sectionModal").close();
+$("sectionModal").onclick=e=>{if(e.target===$("sectionModal"))$("sectionModal").close()};
 $("rotate").onclick=()=>{if(!selectedIds.size)return;commit(blocks.map(b=>selectedIds.has(b.id)?{...b,rotation:b.rotation===0?90:0}:b));updateSelectionEditor()};
 $("duplicate").onclick=()=>{const copies=selectedBlocks().map(b=>({...b,id:uid(),x:b.x+18,y:b.y+18}));if(!copies.length)return;commit([...blocks,...copies]);selectBlocks(copies.map(b=>b.id))};
 $("remove").onclick=removeSelected;
