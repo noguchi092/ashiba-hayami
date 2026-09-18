@@ -3,7 +3,9 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs
 
 const $ = id => document.getElementById(id);
 const COLORS = {1829:"#1684f8",1524:"#00a88f",1219:"#6f63e8",914:"#e88b18",610:"#dd4e68"};
+const POST_SIZES=[3800,2850,1900,1425,950,475],LOWER_POST_SIZES=[2750,1425,950,475,238];
 const BASE_SCALE = 1.25, KEY = "ashiba-hayami-v1";
+const columnPlanCache=new Map();
 let blocks=[],history=[],future=[],selectedId=null,selectedIds=new Set(),tool="add";
 let span=1829,width=610,defaultFL=7600,defaultBaseHeight=0,drawingScale=100,mmPerPx=28.222,zoom=1;
 let pdfDoc=null,pageNumber=1,pageCount=0,baseStage={width:1120,height:760};
@@ -37,10 +39,51 @@ function uniquePostPositions(){
   const positions=new Map();
   blocks.forEach(b=>corners(b).forEach(([x,y])=>{
     const key=Math.round(x*1000)+","+Math.round(y*1000),current=positions.get(key);
-    if(current){if(selectedIds.has(b.id))current.selected=true}
-    else positions.set(key,{x,y,selected:selectedIds.has(b.id)});
+    if(current){
+      if(selectedIds.has(b.id))current.selected=true;
+      current.baseHeight=Math.min(current.baseHeight,Number(b.baseHeight||0));
+      current.fl=Math.max(current.fl,Number(b.fl||0));
+    }else positions.set(key,{x,y,selected:selectedIds.has(b.id),baseHeight:Number(b.baseHeight||0),fl:Number(b.fl||0)});
   }));
-  return[...positions.values()];
+  return[...positions.values()].map(p=>({...p,height:Math.max(0,p.fl-p.baseHeight)}));
+}
+
+function solveColumn(rawHeight){
+  const height=Math.round(Math.max(0,Number(rawHeight)||0));
+  if(columnPlanCache.has(height))return columnPlanCache.get(height);
+  const maxRegular=Math.max(0,height-Math.min(...LOWER_POST_SIZES)-45),plans=new Map([[0,[]]]);
+  for(let sum=0;sum<=maxRegular;sum++){
+    const plan=plans.get(sum);if(!plan)continue;
+    POST_SIZES.forEach(size=>{
+      const next=sum+size;if(next>maxRegular)return;
+      const candidate=[...plan,size],existing=plans.get(next);
+      const candidate1900=candidate.filter(v=>v===1900).length,existing1900=existing?.filter(v=>v===1900).length??-1;
+      if(!existing||candidate.length<existing.length||(candidate.length===existing.length&&candidate1900>existing1900))plans.set(next,candidate);
+    });
+  }
+  const candidates=[];
+  LOWER_POST_SIZES.forEach(lower=>plans.forEach((regular,regularTotal)=>{
+    const jack=height-lower-regularTotal;
+    if(jack>=45&&jack<=345)candidates.push({lower,regular,jack,pieces:regular.length+1,standard:regular.filter(v=>v===1900).length});
+  }));
+  candidates.sort((a,b)=>a.pieces-b.pieces||Math.abs(a.jack-150)-Math.abs(b.jack-150)||b.standard-a.standard||b.lower-a.lower);
+  const result=candidates[0]||null;columnPlanCache.set(height,result);return result;
+}
+
+function verticalBreakdown(posts){
+  const lower=new Map(),regular=new Map(),jacks=new Map();let unresolved=0;
+  posts.forEach(post=>{
+    const plan=solveColumn(post.height);if(!plan){unresolved++;return}
+    lower.set(plan.lower,(lower.get(plan.lower)||0)+1);
+    plan.regular.forEach(size=>regular.set(size,(regular.get(size)||0)+1));
+    jacks.set(plan.jack,(jacks.get(plan.jack)||0)+1);
+  });
+  const rows=[];
+  [...lower].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["下部支柱 "+size,"最下段・IQ系",count,"本"]));
+  [...regular].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["支柱 "+size,"通常支柱・IQ系",count,"本"]));
+  [...jacks].sort((a,b)=>a[0]-b[0]).forEach(([length,count])=>rows.push(["ジャッキベース","AJP・使用長 "+length+"mm",count,"本"]));
+  if(unresolved)rows.push(["支柱構成 要確認","規格内で構成できない高さ",unresolved,"箇所"]);
+  return rows;
 }
 const overlapArea=(a,b)=>{
   const ad=dimensions(a),bd=dimensions(b);
@@ -149,10 +192,23 @@ function updateSummary(){
 }
 function quantities(){
   if(!blocks.length)return[];
-  const levels=b=>Math.max(0,Math.ceil(scaffoldHeight(b)/1900)),totalLevels=blocks.reduce((s,b)=>s+levels(b),0),postCount=uniquePostPositions().length;
-  const maxLevels=Math.max(...blocks.map(levels)),decks=blocks.reduce((s,b)=>s+levels(b)*Math.max(1,Math.ceil(b.width/500)),0);
+  const levels=b=>Math.max(0,Math.ceil(scaffoldHeight(b)/1900)),posts=uniquePostPositions(),postCount=posts.length;
   const length=blocks.reduce((s,b)=>s+b.span,0)/1000,maxHeight=Math.max(...blocks.map(scaffoldHeight))/1000;
-  return[["支柱位置","平面上の建地",postCount,"箇所"],["支柱部材","1,900mm相当",postCount*maxLevels,"本"],["ジャッキベース","標準",postCount,"本"],["布材","スパン別概算",totalLevels*2,"本"],["腕木","足場幅別概算",totalLevels*2,"本"],["鋼製踏板","500幅換算",decks,"枚"],["先行手すり","外側",totalLevels,"枚"],["幅木","外側",totalLevels,"枚"],["壁つなぎ","8m×9m目安",Math.max(1,Math.ceil(length/8)*Math.ceil(maxHeight/9)),"本"]];
+  const spanTotals=new Map(),widthTotals=new Map(),deckTotals=new Map();
+  blocks.forEach(b=>{
+    const count=levels(b);spanTotals.set(b.span,(spanTotals.get(b.span)||0)+count);widthTotals.set(b.width,(widthTotals.get(b.width)||0)+count*2);
+    const deckKey=b.span+"×500";deckTotals.set(deckKey,(deckTotals.get(deckKey)||0)+count*Math.max(1,Math.ceil(b.width/500)));
+  });
+  const rows=[["支柱位置","共有支柱を重複除外",postCount,"箇所"],...verticalBreakdown(posts)];
+  [...spanTotals].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>{
+    rows.push(["布材 "+size,"スパン別・各段1本",count,"本"]);
+    rows.push(["IQ手すり "+size,"内側・各段1本",count,"本"]);
+    rows.push(["IQ先行手すり "+size,"外側・各段1枚",count,"枚"]);
+    rows.push(["幅木 "+size,"外側・スパン別",count,"枚"]);
+  });
+  [...widthTotals].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["腕木 "+size,"足場幅別・各段2本",count,"本"]));
+  [...deckTotals].sort((a,b)=>b[0].localeCompare(a[0],"ja",{numeric:true})).forEach(([size,count])=>rows.push(["鋼製踏板 "+size,"500幅換算",count,"枚"]));
+  rows.push(["壁つなぎ","8m×9m目安",Math.max(1,Math.ceil(length/8)*Math.ceil(maxHeight/9)),"本"]);return rows;
 }
 function updateDefaultHeightPreview(){
   defaultFL=Number($("defaultFL").value||0);defaultBaseHeight=Number($("defaultBaseHeight").value||0);
