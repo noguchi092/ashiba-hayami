@@ -7,7 +7,7 @@ const POST_SIZES=[3800,2850,1900,1425,950,475],LOWER_POST_SIZES=[2750,1425,950,4
 const BASE_SCALE = 1.25, KEY = "ashiba-hayami-v1";
 const columnPlanCache=new Map();
 let blocks=[],history=[],future=[],selectedId=null,selectedIds=new Set(),tool="add";
-let span=1829,width=610,defaultFL=7600,defaultBaseHeight=0,drawingScale=100,mmPerPx=28.222,zoom=1;
+let span=1829,width=610,defaultFL=700,defaultBaseHeight=0,defaultFloorCount=1,drawingScale=100,mmPerPx=28.222,zoom=1;
 let pdfDoc=null,pageNumber=1,pageCount=0,baseStage={width:1120,height:760};
 let calibrationPoints=[],drag=null,range=null,pan=null,renderTask=null,fitOnNextRender=false,panelCollapsed=true,suppressNextClick=false;
 let wheelTimer=null,pendingWheelZoom=null,wheelAnchor=null,levelApplyTimer=null;
@@ -15,14 +15,16 @@ let wheelTimer=null,pendingWheelZoom=null,wheelAnchor=null,levelApplyTimer=null;
 const stage=$("stage"),layer=$("blocksLayer"),postsLayer=$("postsLayer"),selectionLayer=$("selectionLayer"),calLayer=$("calibrationLayer"),canvas=$("pdfCanvas"),canvasScroll=$("canvasScroll");
 const uid=()=>Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,8);
 const status=message=>{$("status").textContent=message;$("ratio").textContent=mmPerPx.toFixed(2)+" mm / px"};
-const scaffoldHeight=b=>Math.max(0,Number(b.fl??b.height??0)-Number(b.baseHeight??0));
-const workFloorHeights=height=>{const floors=[];for(let level=Math.max(0,Number(height)||0);level>0;level-=1900)floors.unshift(level);return floors};
-const liftCount=height=>Math.max(0,workFloorHeights(height).length-1);
+const firstFloorHeight=b=>Math.max(0,Number(b.firstFloorFL??b.fl??0)-Number(b.baseHeight??0));
+const floorCountOf=b=>Math.max(1,Math.round(Number(b.floorCount)||1));
+const workFloorHeights=b=>Array.from({length:floorCountOf(b)},(_,i)=>firstFloorHeight(b)+i*1900);
+const scaffoldHeight=b=>workFloorHeights(b).at(-1)??0;
+const liftCount=b=>Math.max(0,floorCountOf(b)-1);
 const normalizeBlock=b=>{
-  const baseHeight=Number(b.baseHeight??0),fl=Number(b.fl??(Number(b.height??7600)+baseHeight));
-  return{...b,fl,baseHeight,height:Math.max(0,fl-baseHeight),outerProtection:b.outerProtection??"handrail",innerProtection:b.innerProtection??"handrail"};
+  const baseHeight=Number(b.baseHeight??0),firstFloorFL=Number(b.firstFloorFL??b.fl??(700+baseHeight)),floorCount=floorCountOf(b),fl=firstFloorFL+(floorCount-1)*1900;
+  return{...b,firstFloorFL,floorCount,fl,baseHeight,height:Math.max(0,fl-baseHeight),outerProtection:b.outerProtection??"handrail",innerProtection:b.innerProtection??"handrail"};
 };
-const saveLocal=()=>localStorage.setItem(KEY,JSON.stringify({blocks,mmPerPx,drawingScale,defaultFL,defaultBaseHeight,panelCollapsed,levelSettingsApplyAll:true}));
+const saveLocal=()=>localStorage.setItem(KEY,JSON.stringify({blocks,mmPerPx,drawingScale,defaultFL,defaultBaseHeight,defaultFloorCount,panelCollapsed,levelSettingsApplyAll:true,workFloorBasisV2:true}));
 const setSectionOpen=(id,open)=>{
   const section=$(id);if(!section)return;
   section.classList.toggle("open",open);const toggle=section.querySelector(".section-toggle"),mark=section.querySelector(".section-chevron");
@@ -210,22 +212,22 @@ function selectBlocks(ids){
 }
 function selectBlock(id){selectBlocks(id?[id]:[])}
 function renderSelectionSection(block){
-  const preview=$("selectionSectionView"),height=scaffoldHeight(block),floorHeights=workFloorHeights(height),levels=liftCount(height);
+  const preview=$("selectionSectionView"),height=scaffoldHeight(block),floorHeights=workFloorHeights(block),levels=liftCount(block);
   const bottom=130,top=16,left=62,right=188,totalHeight=Math.max(height+900,1),usable=bottom-top,yAt=elevation=>bottom-(elevation/totalHeight)*usable;
   const floors=floorHeights.map(levelHeight=>{
     const y=yAt(levelHeight),rail450=yAt(levelHeight+450),rail900=yAt(levelHeight+900);
     return`<line class="section-floor" x1="${left}" y1="${y}" x2="${right}" y2="${y}"/><line class="section-handrail" x1="${left}" y1="${rail450}" x2="${right}" y2="${rail450}"/><line class="section-handrail" x1="${left}" y1="${rail900}" x2="${right}" y2="${rail900}"/><text class="section-level" x="${left-7}" y="${y+3}" text-anchor="end">${levelHeight.toLocaleString()}</text>`;
   }).join("");
   const lowest=floorHeights[0]??0;
-  preview.innerHTML=`<svg viewBox="0 0 260 164" role="img" aria-label="長手方向 ${block.span}ミリ、最上段作業床 ${height}ミリ、床間${levels}段">
+  preview.innerHTML=`<svg viewBox="0 0 260 164" role="img" aria-label="長手方向 ${block.span}ミリ、1段目作業床 ${lowest}ミリ、作業床${floorHeights.length}層">
     <line class="section-ground" x1="38" y1="${bottom+4}" x2="214" y2="${bottom+4}"/>
     <line class="section-post" x1="${left}" y1="${top}" x2="${left}" y2="${bottom}"/><line class="section-post" x1="${right}" y1="${top}" x2="${right}" y2="${bottom}"/>
     ${floors}<path class="section-jack" d="M55 134h14l-7-6zm126 0h14l-7-6z"/>
     <line class="section-dimension" x1="${left}" y1="148" x2="${right}" y2="148"/><path class="section-arrow" d="M62 148l6-3v6zm126 0l-6-3v6z"/>
     <text class="section-width" x="125" y="160" text-anchor="middle">長手 ${block.span.toLocaleString()} mm</text>
-    <text class="section-height" x="250" y="78" text-anchor="middle" transform="rotate(-90 250 78)">作業床 ${height.toLocaleString()} mm</text>
-    <text class="section-badge" x="198" y="14">${levels}段・床${floorHeights.length}層</text>
-    <text class="section-note" x="198" y="26">最下段 ${lowest.toLocaleString()} mm</text>
+    <text class="section-height" x="250" y="78" text-anchor="middle" transform="rotate(-90 250 78)">最上段 ${height.toLocaleString()} mm</text>
+    <text class="section-badge" x="198" y="14">作業床 ${floorHeights.length}層</text>
+    <text class="section-note" x="198" y="26">1段目 ${lowest.toLocaleString()} mm</text>
   </svg>`;
 }
 function updateSelectionEditor(){
@@ -236,12 +238,13 @@ function updateSelectionEditor(){
   $("selectedColor").style.background=selected.length===1?COLORS[first.span]:"#e53253";
   $("selectedSpec").textContent=selected.length===1?first.span+" × "+first.width:selected.length+"件の足場";
   document.querySelector(".selected-spec small").textContent=selected.length===1?"mm":"";
-  $("selectedFL").value=same("fl")?first.fl:"";$("selectedFL").placeholder=same("fl")?"":"複数";
+  $("selectedFL").value=same("firstFloorFL")?first.firstFloorFL:"";$("selectedFL").placeholder=same("firstFloorFL")?"":"複数";
   $("selectedBaseHeight").value=same("baseHeight")?first.baseHeight:"";$("selectedBaseHeight").placeholder=same("baseHeight")?"":"複数";
-  const heights=selected.map(scaffoldHeight),sameHeight=heights.every(v=>v===heights[0]);
-  $("selectedActualHeight").textContent=sameHeight?heights[0].toLocaleString()+" mm":"複数";
-  const levels=heights.map(liftCount),floorCounts=heights.map(v=>workFloorHeights(v).length),lowest=heights.map(v=>workFloorHeights(v)[0]??0);
-  $("selectedLevels").textContent=levels.every(v=>v===levels[0])&&floorCounts.every(v=>v===floorCounts[0])&&lowest.every(v=>v===lowest[0])?levels[0]+"段（床"+floorCounts[0]+"層・最下段"+lowest[0].toLocaleString()+"mm）":"複数";
+  $("selectedFloorCount").value=same("floorCount")?first.floorCount:"";$("selectedFloorCount").placeholder=same("floorCount")?"":"複数";
+  const firstHeights=selected.map(firstFloorHeight),sameFirst=firstHeights.every(v=>v===firstHeights[0]);
+  $("selectedActualHeight").textContent=sameFirst?firstHeights[0].toLocaleString()+" mm":"複数";
+  const tops=selected.map(scaffoldHeight),floorCounts=selected.map(floorCountOf);
+  $("selectedLevels").textContent=tops.every(v=>v===tops[0])&&floorCounts.every(v=>v===floorCounts[0])?floorCounts[0]+"層（最上段"+tops[0].toLocaleString()+"mm）":"複数";
 }
 function applyElevationChange(key,value){
   if(!selectedIds.size||value==="")return;const number=Number(value);
@@ -255,7 +258,7 @@ function updateSummary(){
 }
 function quantities(){
   if(!blocks.length)return[];
-  const floorCount=b=>workFloorHeights(scaffoldHeight(b)).length,posts=uniquePostPositions(),postCount=posts.length;
+  const floorCount=floorCountOf,posts=uniquePostPositions(),postCount=posts.length;
   const rootTotals=new Map(),workHandrails=new Map(),deckTotals=new Map();
   uniquePlanEdges().forEach(edge=>rootTotals.set(edge.size,(rootTotals.get(edge.size)||0)+1));
   blocks.forEach(b=>{
@@ -272,12 +275,13 @@ function quantities(){
   rows.push(group("昇降"),["階段 1900","IQアルミカイダン19",stairCount,"基"],["階段手すり","IQカイダンレール",stairCount,"本"]);return rows;
 }
 function updateDefaultHeightPreview(){
-  defaultFL=Number($("defaultFL").value||0);defaultBaseHeight=Number($("defaultBaseHeight").value||0);
-  const actual=defaultFL-defaultBaseHeight;$("defaultActualHeight").textContent=Math.max(0,actual).toLocaleString()+" mm";$("addMode").disabled=actual<=0;saveLocal();
+  defaultFL=Number($("defaultFL").value||0);defaultBaseHeight=Number($("defaultBaseHeight").value||0);defaultFloorCount=Math.max(1,Math.round(Number($("defaultFloorCount").value)||1));
+  $("defaultFloorCount").value=defaultFloorCount;const first=Math.max(0,defaultFL-defaultBaseHeight),top=first+(defaultFloorCount-1)*1900;
+  $("defaultActualHeight").textContent=defaultFloorCount===1?first.toLocaleString()+" mm":first.toLocaleString()+" → "+top.toLocaleString()+" mm";$("addMode").disabled=first<=0;saveLocal();
 }
 function applyDefaultLevelToAll(){
-  const actual=defaultFL-defaultBaseHeight;if(!blocks.length||actual<=0)return;
-  commit(blocks.map(b=>({...b,fl:defaultFL,baseHeight:defaultBaseHeight,height:actual})));updateSelectionEditor();status(blocks.length+"件すべてにレベル設定を反映しました");
+  const first=defaultFL-defaultBaseHeight;if(!blocks.length||first<=0)return;
+  commit(blocks.map(b=>({...b,firstFloorFL:defaultFL,floorCount:defaultFloorCount,baseHeight:defaultBaseHeight})));updateSelectionEditor();status(blocks.length+"件すべてに作業床設定を反映しました");
 }
 function handleDefaultLevelInput(){
   updateDefaultHeightPreview();clearTimeout(levelApplyTimer);levelApplyTimer=setTimeout(applyDefaultLevelToAll,250);
@@ -307,7 +311,7 @@ $("drawingScale").onchange=e=>{drawingScale=Number(e.target.value);mmPerPx=drawi
 $("calibrate").onclick=()=>{calibrationPoints=[];setTool("calibrate");renderCalibration();status("図面上の基準寸法の両端をクリックしてください")};
 document.querySelectorAll("[data-span]").forEach(el=>el.onclick=()=>{document.querySelectorAll("[data-span]").forEach(v=>v.classList.remove("active"));el.classList.add("active");span=Number(el.dataset.span);setTool("add")});
 $("scaffoldWidth").onchange=e=>width=Number(e.target.value);
-$("defaultFL").oninput=handleDefaultLevelInput;$("defaultBaseHeight").oninput=handleDefaultLevelInput;
+$("defaultFL").oninput=handleDefaultLevelInput;$("defaultBaseHeight").oninput=handleDefaultLevelInput;$("defaultFloorCount").oninput=handleDefaultLevelInput;
 $("addMode").onclick=$("placeMode").onclick=()=>setTool("add");$("selectMode").onclick=()=>setTool("select");$("fitView").onclick=fitToView;
 $("summaryToggle").onclick=()=>{panelCollapsed=!panelCollapsed;applyPanelState();saveLocal()};
 document.querySelectorAll(".section-toggle").forEach(toggle=>toggle.addEventListener("click",()=>setSectionOpen(toggle.closest(".setup-section").id,toggle.getAttribute("aria-expanded")!=="true")));
@@ -343,8 +347,8 @@ stage.addEventListener("click",e=>{
     }return;
   }
   if(tool!=="add"){selectBlock(null);return}
-  const actualHeight=defaultFL-defaultBaseHeight;if(actualHeight<=0){status("最上段作業床FLは設置面高さより大きくしてください");return}
-  const w=span/mmPerPx,d=width/mmPerPx,raw={id:uid(),x:Math.max(0,p.x-w/2),y:Math.max(0,p.y-d/2),span,width,fl:defaultFL,baseHeight:defaultBaseHeight,height:actualHeight,rotation:0,outerProtection:"handrail",innerProtection:"handrail"};
+  const firstHeight=defaultFL-defaultBaseHeight;if(firstHeight<=0){status("1段目作業床FLは設置面高さより大きくしてください");return}
+  const w=span/mmPerPx,d=width/mmPerPx,raw={id:uid(),x:Math.max(0,p.x-w/2),y:Math.max(0,p.y-d/2),span,width,firstFloorFL:defaultFL,floorCount:defaultFloorCount,baseHeight:defaultBaseHeight,rotation:0,outerProtection:"handrail",innerProtection:"handrail"};
   const result=snapBlock(raw),b=result.block;commit([...blocks,b]);selectBlock(b.id);status(result.snapped?"支柱位置に吸着して配置しました":span+"mmスパンを配置しました");
 });
 stage.addEventListener("pointermove",e=>{
@@ -372,8 +376,9 @@ stage.addEventListener("pointercancel",()=>{drag=null;range=null;stage.classList
 $("zoomOut").onclick=()=>applyZoom(zoom-.15);$("zoomIn").onclick=()=>applyZoom(zoom+.15);
 $("undo").onclick=()=>{const prev=history.at(-1);if(!prev)return;future=[structuredClone(blocks),...future];blocks=prev.map(normalizeBlock);history=history.slice(0,-1);selectBlocks([]);saveLocal();renderBlocks();updateSummary()};
 $("redo").onclick=()=>{const next=future[0];if(!next)return;history=[...history,structuredClone(blocks)];blocks=next.map(normalizeBlock);future=future.slice(1);selectBlocks([]);saveLocal();renderBlocks();updateSummary()};
-$("selectedFL").onchange=e=>applyElevationChange("fl",e.target.value);
+$("selectedFL").onchange=e=>applyElevationChange("firstFloorFL",e.target.value);
 $("selectedBaseHeight").onchange=e=>applyElevationChange("baseHeight",e.target.value);
+$("selectedFloorCount").onchange=e=>applyElevationChange("floorCount",Math.max(1,Math.round(Number(e.target.value)||1)));
 $("rotate").onclick=()=>{if(!selectedIds.size)return;commit(blocks.map(b=>selectedIds.has(b.id)?{...b,rotation:b.rotation===0?90:0}:b));updateSelectionEditor()};
 $("duplicate").onclick=()=>{const copies=selectedBlocks().map(b=>({...b,id:uid(),x:b.x+18,y:b.y+18}));if(!copies.length)return;commit([...blocks,...copies]);selectBlocks(copies.map(b=>b.id))};
 $("remove").onclick=removeSelected;
@@ -385,7 +390,7 @@ document.addEventListener("keydown",e=>{
   e.preventDefault();
   removeSelected();
 });
-$("saveProject").onclick=()=>{download("足場拾いデータ.json",JSON.stringify({version:2,blocks,mmPerPx,drawingScale,savedAt:new Date().toISOString()},null,2),"application/json");status("作業データを保存しました")};
+$("saveProject").onclick=()=>{download("足場拾いデータ.json",JSON.stringify({version:3,blocks,mmPerPx,drawingScale,savedAt:new Date().toISOString()},null,2),"application/json");status("作業データを保存しました")};
 $("projectInput").onchange=async e=>{try{const data=JSON.parse(await e.target.files[0].text());if(!Array.isArray(data.blocks))throw new Error();history=[...history,structuredClone(blocks)];blocks=data.blocks.map(normalizeBlock);mmPerPx=data.mmPerPx||mmPerPx;drawingScale=data.drawingScale||drawingScale;$("drawingScale").value=drawingScale;selectBlocks([]);saveLocal();renderBlocks();updateSummary();status("作業データを読み込みました")}catch{status("作業データを読み込めませんでした")}};
 $("csv").onclick=()=>{const rows=[["部材名","規格・条件","数量","単位"],...quantities().map(r=>r[4]==="group"?[r[0],r[1],"",""]:r.slice(0,4))],csv="\ufeff"+rows.map(r=>r.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(",")).join("\r\n");download("足場概算数量.csv",csv,"text/csv;charset=utf-8")};
 $("print").onclick=()=>window.print();
@@ -394,9 +399,10 @@ try{
   const data=JSON.parse(localStorage.getItem(KEY)||"{}");
   if(Array.isArray(data.blocks))blocks=data.blocks.map(normalizeBlock);if(data.mmPerPx)mmPerPx=data.mmPerPx;
   if(data.drawingScale){drawingScale=data.drawingScale;$("drawingScale").value=drawingScale}
-  if(Number.isFinite(data.defaultFL)){defaultFL=data.defaultFL;$("defaultFL").value=defaultFL}
+  if(data.workFloorBasisV2===true&&Number.isFinite(data.defaultFL)){defaultFL=data.defaultFL;$("defaultFL").value=defaultFL}else{$("defaultFL").value=defaultFL}
   if(Number.isFinite(data.defaultBaseHeight)){defaultBaseHeight=data.defaultBaseHeight;$("defaultBaseHeight").value=defaultBaseHeight}
-  if(blocks.length&&data.levelSettingsApplyAll!==true){const actual=Math.max(0,defaultFL-defaultBaseHeight);blocks=blocks.map(b=>normalizeBlock({...b,fl:defaultFL,baseHeight:defaultBaseHeight,height:actual}))}
+  if(data.workFloorBasisV2===true&&Number.isFinite(data.defaultFloorCount)){defaultFloorCount=Math.max(1,Math.round(data.defaultFloorCount));$("defaultFloorCount").value=defaultFloorCount}
+  if(data.workFloorBasisV2!==true)blocks=blocks.map(b=>normalizeBlock({...b,firstFloorFL:Number(b.baseHeight||0)+700,floorCount:1}));
   if(typeof data.panelCollapsed==="boolean")panelCollapsed=data.panelCollapsed;if(blocks.length)status("前回の配置データを復元しました");
 }catch{localStorage.removeItem(KEY)}
 updateDefaultHeightPreview();applyPanelState();setStageSize();renderBlocks();updateSummary();updateSelectionEditor();status($("status").textContent);
