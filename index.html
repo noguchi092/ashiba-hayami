@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="PDF図面上にIQ足場を配置し、基本部材の概算数量を拾えるツールです。">
   <title>簡易足場拾い｜IQ足場の概算数量</title>
-  <link rel="stylesheet" href="./style.css?v=12">
+  <link rel="stylesheet" href="./style.css?v=13">
 </head>
 <body>
   <header class="topbar">
@@ -104,7 +104,7 @@
         <div class="card-title"><h2>選択中の足場</h2><span class="badge" id="selectionBadge">未選択</span></div>
         <div id="selectionEmpty" class="empty-selection">図面上の足場を選ぶと、高さや向きを変更できます。</div>
         <div id="selectionEditor" class="hidden">
-          <div class="section-preview" id="selectionSectionView" aria-label="選択した足場の断面図"></div>
+          <div class="section-preview" id="selectionSectionView" aria-label="選択した足場の長手方向立面図"></div>
           <div class="selected-spec"><i id="selectedColor"></i><strong id="selectedSpec"></strong><small>mm</small></div>
           <div class="two-fields">
             <div><label>最上段作業床FL（mm）</label><input id="selectedFL" type="number" step="100"></div>
@@ -130,6 +130,6 @@
     <div><strong>簡易足場拾い</strong><span>© 2026 タイマイオンザライス</span></div>
     <nav><a href="./operator.html">運営者情報</a><a href="./privacy.html">プライバシーポリシー</a></nav>
   </footer>
-  <script type="module" src="./app.js?v=14"></script>
+  <script type="module" src="./app.js?v=15"></script>
 </body>
 </html>
