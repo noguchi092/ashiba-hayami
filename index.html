@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="PDF図面上にIQ足場を配置し、基本部材の概算数量を拾えるツールです。">
   <title>簡易足場拾い｜IQ足場の概算数量</title>
-  <link rel="stylesheet" href="./style.css?v=15">
+  <link rel="stylesheet" href="./style.css?v=16">
 </head>
 <body>
   <header class="topbar">
@@ -75,6 +75,7 @@
           </div>
           <label>足場幅</label>
           <select id="scaffoldWidth"><option>610</option><option>914</option><option>1219</option></select>
+          <label class="stair-option"><input id="placeStair" type="checkbox"><span><strong>階段を設置</strong><small>1829スパン・1,900mm区間</small></span></label>
           <button class="btn primary full" id="addMode">＋ 図面をクリックして配置</button>
         </div>
       </section>
@@ -114,6 +115,7 @@
           <div class="selected-floor-count"><label>作業床層数</label><input id="selectedFloorCount" type="number" min="1" step="1"></div>
           <p class="actual-height">足場上部レベル <strong id="selectedActualHeight">FL 0 mm</strong></p>
           <p class="levels">作業床構成 <strong id="selectedLevels">1層</strong></p>
+          <button id="toggleStair" class="stair-toggle" type="button">階段を追加</button>
           <div class="selection-actions"><button id="rotate">↻ 回転</button><button id="duplicate">⧉ 複製</button><button id="remove" class="danger">削除</button></div>
         </div>
       </section>
@@ -132,6 +134,6 @@
     <div><strong>簡易足場拾い</strong><span>© 2026 タイマイオンザライス</span></div>
     <nav><a href="./operator.html">運営者情報</a><a href="./privacy.html">プライバシーポリシー</a></nav>
   </footer>
-  <script type="module" src="./app.js?v=17"></script>
+  <script type="module" src="./app.js?v=18"></script>
 </body>
 </html>
