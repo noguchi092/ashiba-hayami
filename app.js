@@ -16,9 +16,11 @@ const stage=$("stage"),layer=$("blocksLayer"),postsLayer=$("postsLayer"),selecti
 const uid=()=>Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,8);
 const status=message=>{$("status").textContent=message;$("ratio").textContent=mmPerPx.toFixed(2)+" mm / px"};
 const scaffoldHeight=b=>Math.max(0,Number(b.fl??b.height??0)-Number(b.baseHeight??0));
+const workFloorHeights=height=>{const floors=[];for(let level=Math.max(0,Number(height)||0);level>0;level-=1900)floors.unshift(level);return floors};
+const liftCount=height=>Math.max(0,workFloorHeights(height).length-1);
 const normalizeBlock=b=>{
   const baseHeight=Number(b.baseHeight??0),fl=Number(b.fl??(Number(b.height??7600)+baseHeight));
-  return{...b,fl,baseHeight,height:Math.max(0,fl-baseHeight)};
+  return{...b,fl,baseHeight,height:Math.max(0,fl-baseHeight),outerProtection:b.outerProtection??"handrail",innerProtection:b.innerProtection??"handrail"};
 };
 const saveLocal=()=>localStorage.setItem(KEY,JSON.stringify({blocks,mmPerPx,drawingScale,defaultFL,defaultBaseHeight,panelCollapsed,levelSettingsApplyAll:true}));
 const setSectionOpen=(id,open)=>{
@@ -208,22 +210,22 @@ function selectBlocks(ids){
 }
 function selectBlock(id){selectBlocks(id?[id]:[])}
 function renderSelectionSection(block){
-  const preview=$("selectionSectionView"),height=scaffoldHeight(block),levels=Math.max(1,Math.ceil(height/1900));
-  const bottom=126,top=18,left=62,right=188,usable=bottom-top;
-  const floorHeights=Array.from({length:levels},(_,i)=>Math.min((i+1)*1900,height));
-  const floors=floorHeights.map((levelHeight,i)=>{
-    const y=bottom-(levelHeight/Math.max(height,1))*usable;
-    const brace=i%2===0?`<line class="section-brace" x1="${left}" y1="${Math.min(bottom,y+usable/levels)}" x2="${right}" y2="${y}"/>`:`<line class="section-brace" x1="${right}" y1="${Math.min(bottom,y+usable/levels)}" x2="${left}" y2="${y}"/>`;
-    return`${brace}<line class="section-floor" x1="${left}" y1="${y}" x2="${right}" y2="${y}"/><text class="section-level" x="${left-7}" y="${y+3}" text-anchor="end">${levelHeight.toLocaleString()}</text>`;
+  const preview=$("selectionSectionView"),height=scaffoldHeight(block),floorHeights=workFloorHeights(height),levels=liftCount(height);
+  const bottom=130,top=16,left=62,right=188,totalHeight=Math.max(height+900,1),usable=bottom-top,yAt=elevation=>bottom-(elevation/totalHeight)*usable;
+  const floors=floorHeights.map(levelHeight=>{
+    const y=yAt(levelHeight),rail450=yAt(levelHeight+450),rail900=yAt(levelHeight+900);
+    return`<line class="section-floor" x1="${left}" y1="${y}" x2="${right}" y2="${y}"/><line class="section-handrail" x1="${left}" y1="${rail450}" x2="${right}" y2="${rail450}"/><line class="section-handrail" x1="${left}" y1="${rail900}" x2="${right}" y2="${rail900}"/><text class="section-level" x="${left-7}" y="${y+3}" text-anchor="end">${levelHeight.toLocaleString()}</text>`;
   }).join("");
-  preview.innerHTML=`<svg viewBox="0 0 260 160" role="img" aria-label="足場幅 ${block.width}ミリ、高さ ${height}ミリ、${levels}段">
-    <line class="section-ground" x1="38" y1="132" x2="214" y2="132"/>
+  const lowest=floorHeights[0]??0;
+  preview.innerHTML=`<svg viewBox="0 0 260 164" role="img" aria-label="足場幅 ${block.width}ミリ、最上段作業床 ${height}ミリ、床間${levels}段">
+    <line class="section-ground" x1="38" y1="${bottom+4}" x2="214" y2="${bottom+4}"/>
     <line class="section-post" x1="${left}" y1="${top}" x2="${left}" y2="${bottom}"/><line class="section-post" x1="${right}" y1="${top}" x2="${right}" y2="${bottom}"/>
-    ${floors}<path class="section-jack" d="M55 132h14l-7-6zm126 0h14l-7-6z"/>
-    <line class="section-dimension" x1="${left}" y1="145" x2="${right}" y2="145"/><path class="section-arrow" d="M62 145l6-3v6zm126 0l-6-3v6z"/>
-    <text class="section-width" x="125" y="156" text-anchor="middle">幅 ${block.width.toLocaleString()} mm</text>
-    <text class="section-height" x="250" y="76" text-anchor="middle" transform="rotate(-90 250 76)">H ${height.toLocaleString()} mm</text>
-    <text class="section-badge" x="202" y="18">${levels}段</text>
+    ${floors}<path class="section-jack" d="M55 134h14l-7-6zm126 0h14l-7-6z"/>
+    <line class="section-dimension" x1="${left}" y1="148" x2="${right}" y2="148"/><path class="section-arrow" d="M62 148l6-3v6zm126 0l-6-3v6z"/>
+    <text class="section-width" x="125" y="160" text-anchor="middle">幅 ${block.width.toLocaleString()} mm</text>
+    <text class="section-height" x="250" y="78" text-anchor="middle" transform="rotate(-90 250 78)">作業床 ${height.toLocaleString()} mm</text>
+    <text class="section-badge" x="198" y="14">${levels}段・床${floorHeights.length}層</text>
+    <text class="section-note" x="198" y="26">最下段 ${lowest.toLocaleString()} mm</text>
   </svg>`;
 }
 function updateSelectionEditor(){
@@ -238,7 +240,8 @@ function updateSelectionEditor(){
   $("selectedBaseHeight").value=same("baseHeight")?first.baseHeight:"";$("selectedBaseHeight").placeholder=same("baseHeight")?"":"複数";
   const heights=selected.map(scaffoldHeight),sameHeight=heights.every(v=>v===heights[0]);
   $("selectedActualHeight").textContent=sameHeight?heights[0].toLocaleString()+" mm":"複数";
-  const levels=heights.map(v=>Math.ceil(v/1900));$("selectedLevels").textContent=levels.every(v=>v===levels[0])?levels[0]+"段":"複数";
+  const levels=heights.map(liftCount),floorCounts=heights.map(v=>workFloorHeights(v).length),lowest=heights.map(v=>workFloorHeights(v)[0]??0);
+  $("selectedLevels").textContent=levels.every(v=>v===levels[0])&&floorCounts.every(v=>v===floorCounts[0])&&lowest.every(v=>v===lowest[0])?levels[0]+"段（床"+floorCounts[0]+"層・最下段"+lowest[0].toLocaleString()+"mm）":"複数";
 }
 function applyElevationChange(key,value){
   if(!selectedIds.size||value==="")return;const number=Number(value);
@@ -252,20 +255,20 @@ function updateSummary(){
 }
 function quantities(){
   if(!blocks.length)return[];
-  const levels=b=>Math.max(0,Math.ceil(scaffoldHeight(b)/1900)),posts=uniquePostPositions(),postCount=posts.length;
+  const floorCount=b=>workFloorHeights(scaffoldHeight(b)).length,posts=uniquePostPositions(),postCount=posts.length;
   const rootTotals=new Map(),workHandrails=new Map(),deckTotals=new Map();
   uniquePlanEdges().forEach(edge=>rootTotals.set(edge.size,(rootTotals.get(edge.size)||0)+1));
   blocks.forEach(b=>{
-    const count=levels(b);workHandrails.set(b.span,(workHandrails.get(b.span)||0)+count*2);
+    const count=floorCount(b),handrailSides=(b.outerProtection==="handrail"?1:0)+(b.innerProtection==="handrail"?1:0);workHandrails.set(b.span,(workHandrails.get(b.span)||0)+count*2*handrailSides);
     const boardWidths=b.width<=610?[490]:b.width<=914?[490,240]:[490,490];
     boardWidths.forEach(boardWidth=>{const key=b.span+"×"+boardWidth;deckTotals.set(key,(deckTotals.get(key)||0)+count)});
   });
   const group=(name,detail="")=>[name,detail,0,"","group"],rows=[group("支柱","支柱位置 "+postCount+"箇所"),...verticalBreakdown(posts),group("根がらみ材")];
   [...rootTotals].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"平面外周（接続部重複なし）",count,"本"]));
   rows.push(group("作業床材"));
-  [...workHandrails].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"作業床・両側",count,"本"]));
+  [...workHandrails].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"各作業床450/900・内外側",count,"本"]));
   [...deckTotals].sort((a,b)=>b[0].localeCompare(a[0],"ja",{numeric:true})).forEach(([size,count])=>rows.push(["布板 "+size,"Sウォーク",count,"枚"]));
-  const stairCount=connectedBlockGroups().reduce((sum,groupBlocks)=>sum+Math.max(...groupBlocks.map(levels)),0);
+  const stairCount=connectedBlockGroups().reduce((sum,groupBlocks)=>sum+Math.max(...groupBlocks.map(floorCount)),0);
   rows.push(group("昇降"),["階段 1900","IQアルミカイダン19",stairCount,"基"],["階段手すり","IQカイダンレール",stairCount,"本"]);return rows;
 }
 function updateDefaultHeightPreview(){
@@ -340,8 +343,8 @@ stage.addEventListener("click",e=>{
     }return;
   }
   if(tool!=="add"){selectBlock(null);return}
-  const actualHeight=defaultFL-defaultBaseHeight;if(actualHeight<=0){status("上端FLは設置面高さより大きくしてください");return}
-  const w=span/mmPerPx,d=width/mmPerPx,raw={id:uid(),x:Math.max(0,p.x-w/2),y:Math.max(0,p.y-d/2),span,width,fl:defaultFL,baseHeight:defaultBaseHeight,height:actualHeight,rotation:0};
+  const actualHeight=defaultFL-defaultBaseHeight;if(actualHeight<=0){status("最上段作業床FLは設置面高さより大きくしてください");return}
+  const w=span/mmPerPx,d=width/mmPerPx,raw={id:uid(),x:Math.max(0,p.x-w/2),y:Math.max(0,p.y-d/2),span,width,fl:defaultFL,baseHeight:defaultBaseHeight,height:actualHeight,rotation:0,outerProtection:"handrail",innerProtection:"handrail"};
   const result=snapBlock(raw),b=result.block;commit([...blocks,b]);selectBlock(b.id);status(result.snapped?"支柱位置に吸着して配置しました":span+"mmスパンを配置しました");
 });
 stage.addEventListener("pointermove",e=>{
