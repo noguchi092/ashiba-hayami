@@ -52,3 +52,6 @@ html,body{min-height:100%;overflow-x:hidden}.workspace{height:calc(100svh - 66px
 
 /* v12: 作業床基準の断面図 */
 .section-handrail{stroke:#00a88f;stroke-width:2}.section-note{fill:#718392;font-size:7px}.section-badge{font-size:8px}
+
+/* v13: 右パネルのスクロール固定と長手方向立面 */
+@media(min-width:821px){.right-panel{display:grid;grid-template-rows:minmax(0,1fr);min-height:0}.right-panel-content{height:auto;min-height:0;overflow-y:auto;overscroll-behavior:auto;scrollbar-gutter:stable;padding-right:3px;padding-bottom:28px}}
