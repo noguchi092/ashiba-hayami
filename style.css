@@ -37,3 +37,6 @@ html,body{min-height:100%;overflow-x:hidden}.workspace{height:calc(100svh - 66px
 @media(max-width:820px){.left-panel{display:block}.drawing-area{min-height:610px;grid-template-rows:48px 530px 30px}.toolbar{padding-right:52px}}
 @media(max-width:560px){.drawing-area{min-height:560px;grid-template-rows:48px 482px 30px}.toolbar{padding-right:48px}.zoom-btn{width:32px}.toolbar #zoomLabel{min-width:38px}.view-tools{gap:2px!important}}
 @media print{.section-toggle{display:none!important}}
+
+/* v8: 左メニュー上でもページ全体へスクロールを引き継ぐ */
+.left-panel{overscroll-behavior:auto}
