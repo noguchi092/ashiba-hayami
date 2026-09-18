@@ -10,7 +10,7 @@ let blocks=[],history=[],future=[],selectedId=null,selectedIds=new Set(),tool="a
 let span=1829,width=610,defaultFL=7600,defaultBaseHeight=0,drawingScale=100,mmPerPx=28.222,zoom=1;
 let pdfDoc=null,pageNumber=1,pageCount=0,baseStage={width:1120,height:760};
 let calibrationPoints=[],drag=null,range=null,pan=null,renderTask=null,fitOnNextRender=false,panelCollapsed=true,suppressNextClick=false;
-let wheelTimer=null,pendingWheelZoom=null,wheelAnchor=null;
+let wheelTimer=null,pendingWheelZoom=null,wheelAnchor=null,levelApplyTimer=null;
 
 const stage=$("stage"),layer=$("blocksLayer"),postsLayer=$("postsLayer"),selectionLayer=$("selectionLayer"),calLayer=$("calibrationLayer"),canvas=$("pdfCanvas"),canvasScroll=$("canvasScroll");
 const uid=()=>Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,8);
@@ -241,6 +241,9 @@ function applyDefaultLevelToAll(){
   const actual=defaultFL-defaultBaseHeight;if(!blocks.length||actual<=0)return;
   commit(blocks.map(b=>({...b,fl:defaultFL,baseHeight:defaultBaseHeight,height:actual})));updateSelectionEditor();status(blocks.length+"件すべてにレベル設定を反映しました");
 }
+function handleDefaultLevelInput(){
+  updateDefaultHeightPreview();clearTimeout(levelApplyTimer);levelApplyTimer=setTimeout(applyDefaultLevelToAll,250);
+}
 function applyPanelState(){
   document.querySelector(".workspace").classList.toggle("right-collapsed",panelCollapsed);$("rightPanel").classList.toggle("collapsed",panelCollapsed);
   $("summaryToggle").textContent=panelCollapsed?"‹":"›";$("summaryToggle").setAttribute("aria-expanded",String(!panelCollapsed));
@@ -266,8 +269,7 @@ $("drawingScale").onchange=e=>{drawingScale=Number(e.target.value);mmPerPx=drawi
 $("calibrate").onclick=()=>{calibrationPoints=[];setTool("calibrate");renderCalibration();status("図面上の基準寸法の両端をクリックしてください")};
 document.querySelectorAll("[data-span]").forEach(el=>el.onclick=()=>{document.querySelectorAll("[data-span]").forEach(v=>v.classList.remove("active"));el.classList.add("active");span=Number(el.dataset.span);setTool("add")});
 $("scaffoldWidth").onchange=e=>width=Number(e.target.value);
-$("defaultFL").oninput=updateDefaultHeightPreview;$("defaultBaseHeight").oninput=updateDefaultHeightPreview;
-$("defaultFL").onchange=applyDefaultLevelToAll;$("defaultBaseHeight").onchange=applyDefaultLevelToAll;
+$("defaultFL").oninput=handleDefaultLevelInput;$("defaultBaseHeight").oninput=handleDefaultLevelInput;
 $("addMode").onclick=$("placeMode").onclick=()=>setTool("add");$("selectMode").onclick=()=>setTool("select");$("fitView").onclick=fitToView;
 $("summaryToggle").onclick=()=>{panelCollapsed=!panelCollapsed;applyPanelState();saveLocal()};
 document.querySelectorAll(".section-toggle").forEach(toggle=>toggle.addEventListener("click",()=>setSectionOpen(toggle.closest(".setup-section").id,toggle.getAttribute("aria-expanded")!=="true")));
