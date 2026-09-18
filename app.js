@@ -217,12 +217,12 @@ function renderSelectionSection(block){
     return`<line class="section-floor" x1="${left}" y1="${y}" x2="${right}" y2="${y}"/><line class="section-handrail" x1="${left}" y1="${rail450}" x2="${right}" y2="${rail450}"/><line class="section-handrail" x1="${left}" y1="${rail900}" x2="${right}" y2="${rail900}"/><text class="section-level" x="${left-7}" y="${y+3}" text-anchor="end">${levelHeight.toLocaleString()}</text>`;
   }).join("");
   const lowest=floorHeights[0]??0;
-  preview.innerHTML=`<svg viewBox="0 0 260 164" role="img" aria-label="足場幅 ${block.width}ミリ、最上段作業床 ${height}ミリ、床間${levels}段">
+  preview.innerHTML=`<svg viewBox="0 0 260 164" role="img" aria-label="長手方向 ${block.span}ミリ、最上段作業床 ${height}ミリ、床間${levels}段">
     <line class="section-ground" x1="38" y1="${bottom+4}" x2="214" y2="${bottom+4}"/>
     <line class="section-post" x1="${left}" y1="${top}" x2="${left}" y2="${bottom}"/><line class="section-post" x1="${right}" y1="${top}" x2="${right}" y2="${bottom}"/>
     ${floors}<path class="section-jack" d="M55 134h14l-7-6zm126 0h14l-7-6z"/>
     <line class="section-dimension" x1="${left}" y1="148" x2="${right}" y2="148"/><path class="section-arrow" d="M62 148l6-3v6zm126 0l-6-3v6z"/>
-    <text class="section-width" x="125" y="160" text-anchor="middle">幅 ${block.width.toLocaleString()} mm</text>
+    <text class="section-width" x="125" y="160" text-anchor="middle">長手 ${block.span.toLocaleString()} mm</text>
     <text class="section-height" x="250" y="78" text-anchor="middle" transform="rotate(-90 250 78)">作業床 ${height.toLocaleString()} mm</text>
     <text class="section-badge" x="198" y="14">${levels}段・床${floorHeights.length}層</text>
     <text class="section-note" x="198" y="26">最下段 ${lowest.toLocaleString()} mm</text>
