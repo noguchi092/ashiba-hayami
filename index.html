@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="PDF図面上にIQ足場を配置し、基本部材の概算数量を拾えるツールです。">
   <title>簡易足場拾い｜IQ足場の概算数量</title>
-  <link rel="stylesheet" href="./style.css?v=6">
+  <link rel="stylesheet" href="./style.css?v=7">
 </head>
 <body>
   <header class="topbar">
@@ -20,40 +20,71 @@
 
   <main class="workspace">
     <aside class="panel left-panel">
-      <section>
-        <div class="section-title"><b>1</b><h2>図面</h2></div>
-        <label class="pdf-drop">
-          <span class="upload-icon">⇧</span>
-          <strong id="pdfName">PDFを選択</strong>
-          <small id="pdfHelp">またはここへドロップ</small>
-          <input id="pdfInput" type="file" accept="application/pdf" hidden>
-        </label>
-        <div class="page-nav hidden" id="pageNav"><button id="prevPage">‹</button><span id="pageLabel">1 / 1</span><button id="nextPage">›</button></div>
-      </section>
-
-      <section>
-        <div class="section-title"><b>2</b><h2>縮尺</h2></div>
-        <label>図面縮尺</label>
-        <select id="drawingScale">
-          <option value="50">1 / 50</option><option value="100" selected>1 / 100</option>
-          <option value="150">1 / 150</option><option value="200">1 / 200</option>
-          <option value="250">1 / 250</option><option value="500">1 / 500</option>
-        </select>
-        <div class="calibration">
-          <label>分かっている寸法（mm）</label>
-          <input id="knownLength" type="number" min="1" value="6000">
-          <button class="btn outline full" id="calibrate">⌖ 2点で縮尺補正</button>
+      <section class="setup-section open" id="drawingSection">
+        <button class="section-title section-toggle" type="button" aria-expanded="true" aria-controls="drawingSectionContent"><b>1</b><h2>図面</h2><span class="section-chevron">−</span></button>
+        <div class="section-content" id="drawingSectionContent">
+          <label class="pdf-drop">
+            <span class="upload-icon">⇧</span>
+            <strong id="pdfName">PDFを選択</strong>
+            <small id="pdfHelp">またはここへドロップ</small>
+            <input id="pdfInput" type="file" accept="application/pdf" hidden>
+          </label>
+          <div class="page-nav hidden" id="pageNav"><button id="prevPage">‹</button><span id="pageLabel">1 / 1</span><button id="nextPage">›</button></div>
         </div>
       </section>
 
+      <section class="setup-section" id="scaleSection">
+        <button class="section-title section-toggle" type="button" aria-expanded="false" aria-controls="scaleSectionContent"><b>2</b><h2>縮尺設定</h2><span class="section-chevron">＋</span></button>
+        <div class="section-content" id="scaleSectionContent">
+          <label>図面縮尺</label>
+          <select id="drawingScale">
+            <option value="50">1 / 50</option><option value="100" selected>1 / 100</option>
+            <option value="150">1 / 150</option><option value="200">1 / 200</option>
+            <option value="250">1 / 250</option><option value="500">1 / 500</option>
+          </select>
+          <div class="calibration">
+            <label>分かっている寸法（mm）</label>
+            <input id="knownLength" type="number" min="1" value="6000">
+            <button class="btn outline full" id="calibrate">⌖ 2点で縮尺補正</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="setup-section" id="levelSection">
+        <button class="section-title section-toggle" type="button" aria-expanded="false" aria-controls="levelSectionContent"><b>3</b><h2>レベル設定</h2><span class="section-chevron">＋</span></button>
+        <div class="section-content" id="levelSectionContent">
+          <div class="level-fields">
+            <div><label>上端FL（mm）</label><input id="defaultFL" type="number" step="100" value="7600"></div>
+            <div><label>設置面高さ（mm）</label><input id="defaultBaseHeight" type="number" step="100" value="0"></div>
+          </div>
+          <div class="height-result"><span>足場高さ</span><strong id="defaultActualHeight">7,600 mm</strong></div>
+        </div>
+      </section>
+
+      <section class="setup-section open" id="placementSection">
+        <button class="section-title section-toggle" type="button" aria-expanded="true" aria-controls="placementSectionContent"><b>4</b><h2>配置する足場</h2><span class="section-chevron">−</span></button>
+        <div class="section-content" id="placementSectionContent">
+          <label>スパン</label>
+          <div class="span-grid" id="spanGrid">
+            <button class="active" data-span="1829" style="--c:#1684f8">1829<small>mm</small></button>
+            <button data-span="1524" style="--c:#00a88f">1524<small>mm</small></button>
+            <button data-span="1219" style="--c:#6f63e8">1219<small>mm</small></button>
+            <button data-span="914" style="--c:#e88b18">914<small>mm</small></button>
+            <button data-span="610" style="--c:#dd4e68">610<small>mm</small></button>
+          </div>
+          <label>足場幅</label>
+          <select id="scaffoldWidth"><option>610</option><option>914</option><option>1219</option></select>
+          <button class="btn primary full" id="addMode">＋ 図面をクリックして配置</button>
+        </div>
+      </section>
     </aside>
 
     <section class="drawing-area">
       <div class="toolbar">
         <div><button class="tool" id="selectMode">↖ 選択</button><button class="tool active" id="placeMode">▭ 足場配置</button><span class="range-help">右ドラッグ：範囲選択</span></div>
-        <div><button class="icon-btn" id="undo" title="元に戻す">↶</button><button class="icon-btn" id="redo" title="やり直す">↷</button><i></i><button class="fit-btn" id="fitView">全体表示</button><button class="icon-btn" id="zoomOut">−</button><span id="zoomLabel">100%</span><button class="icon-btn" id="zoomIn">＋</button></div>
+        <div class="view-tools"><button class="icon-btn" id="undo" title="元に戻す">↶</button><button class="icon-btn" id="redo" title="やり直す">↷</button><i></i><button class="fit-btn" id="fitView">全体表示</button><button class="zoom-btn" id="zoomOut" title="縮小">−</button><span id="zoomLabel">100%</span><button class="zoom-btn zoom-in" id="zoomIn" title="拡大">＋</button></div>
       </div>
-      <div class="canvas-scroll" id="canvasScroll">
+      <div class="canvas-scroll" id="canvasScroll" title="ホイールで拡大縮小・ホイール押し込みドラッグで移動">
         <div class="drawing-stage tool-add" id="stage">
           <canvas id="pdfCanvas"></canvas>
           <div class="empty-plan" id="emptyPlan"><span>▦</span><strong>PDF図面を読み込んでください</strong><small>図面なしでも足場配置を試せます</small></div>
@@ -63,21 +94,6 @@
           <div id="calibrationLayer"></div>
         </div>
       </div>
-      <section class="placement-bar">
-        <div class="placement-title"><b>3</b><span>配置する足場</span></div>
-        <div class="placement-spans"><label>スパン</label><div class="span-grid" id="spanGrid">
-          <button class="active" data-span="1829" style="--c:#1684f8">1829<small>mm</small></button>
-          <button data-span="1524" style="--c:#00a88f">1524<small>mm</small></button>
-          <button data-span="1219" style="--c:#6f63e8">1219<small>mm</small></button>
-          <button data-span="914" style="--c:#e88b18">914<small>mm</small></button>
-          <button data-span="610" style="--c:#dd4e68">610<small>mm</small></button>
-        </div></div>
-        <div class="placement-field"><label>足場幅</label><select id="scaffoldWidth"><option>610</option><option>914</option><option>1219</option></select></div>
-        <div class="placement-field"><label>上端FL（mm）</label><input id="defaultFL" type="number" step="100" value="7600"></div>
-        <div class="placement-field"><label>設置面高さ（mm）</label><input id="defaultBaseHeight" type="number" step="100" value="0"></div>
-        <div class="height-result"><span>足場高さ</span><strong id="defaultActualHeight">7,600 mm</strong></div>
-        <button class="btn primary placement-add" id="addMode">＋ 図面をクリックして配置</button>
-      </section>
       <div class="statusbar"><span id="status">新しい拾いを開始できます</span><span id="ratio">28.22 mm / px</span></div>
     </section>
 
@@ -113,6 +129,6 @@
     <div><strong>簡易足場拾い</strong><span>© 2026 タイマイオンザライス</span></div>
     <nav><a href="./operator.html">運営者情報</a><a href="./privacy.html">プライバシーポリシー</a></nav>
   </footer>
-  <script type="module" src="./app.js?v=9"></script>
+  <script type="module" src="./app.js?v=10"></script>
 </body>
 </html>
