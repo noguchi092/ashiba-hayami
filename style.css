@@ -55,3 +55,6 @@ html,body{min-height:100%;overflow-x:hidden}.workspace{height:calc(100svh - 66px
 
 /* v13: 右パネルのスクロール固定と長手方向立面 */
 @media(min-width:821px){.right-panel{display:grid;grid-template-rows:minmax(0,1fr);min-height:0}.right-panel-content{height:auto;min-height:0;overflow-y:auto;overscroll-behavior:auto;scrollbar-gutter:stable;padding-right:3px;padding-bottom:28px}}
+
+/* v14: 1段目作業床と作業床層数 */
+.selected-floor-count{margin:10px 0}.selected-floor-count input{height:34px}
