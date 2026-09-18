@@ -40,3 +40,6 @@ html,body{min-height:100%;overflow-x:hidden}.workspace{height:calc(100svh - 66px
 
 /* v8: 左メニュー上でもページ全体へスクロールを引き継ぐ */
 .left-panel{overscroll-behavior:auto}
+
+/* v9: 概算数量の部材区分 */
+.quantity-group th{position:static;padding:9px 10px;border-top:2px solid #cbd9e4;background:#eaf2f8;color:#173b5a;text-align:left;font-size:12px;font-weight:800}.quantity-group:first-child th{border-top:0}.quantity-group small{display:inline;margin-left:7px;color:#687f92;font-size:9px;font-weight:600}
