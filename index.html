@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="PDF図面上にIQ足場を配置し、基本部材の概算数量を拾えるツールです。">
   <title>簡易足場拾い｜IQ足場の概算数量</title>
-  <link rel="stylesheet" href="./style.css?v=14">
+  <link rel="stylesheet" href="./style.css?v=15">
 </head>
 <body>
   <header class="topbar">
@@ -58,7 +58,7 @@
             <div><label>設置面高さ（mm）</label><input id="defaultBaseHeight" type="number" step="100" value="0"></div>
             <div><label>作業床層数</label><input id="defaultFloorCount" type="number" min="1" step="1" value="1"></div>
           </div>
-          <div class="height-result"><span>作業床高さ</span><strong id="defaultActualHeight">700 mm</strong></div>
+          <div class="height-result"><span>足場上部レベル</span><strong id="defaultActualHeight">FL 1,600 mm</strong></div>
         </div>
       </section>
 
@@ -112,7 +112,7 @@
             <div><label>設置面高さ（mm）</label><input id="selectedBaseHeight" type="number" step="100"></div>
           </div>
           <div class="selected-floor-count"><label>作業床層数</label><input id="selectedFloorCount" type="number" min="1" step="1"></div>
-          <p class="actual-height">1段目作業床高さ <strong id="selectedActualHeight">0 mm</strong></p>
+          <p class="actual-height">足場上部レベル <strong id="selectedActualHeight">FL 0 mm</strong></p>
           <p class="levels">作業床構成 <strong id="selectedLevels">1層</strong></p>
           <div class="selection-actions"><button id="rotate">↻ 回転</button><button id="duplicate">⧉ 複製</button><button id="remove" class="danger">削除</button></div>
         </div>
@@ -123,7 +123,7 @@
         <div class="metrics"><div><span>スパン数</span><strong id="metricCount">0</strong><small>箇所</small></div><div><span>延長</span><strong id="metricLength">0.0</strong><small>m</small></div><div><span>掛面積</span><strong id="metricArea">0.0</strong><small>㎡</small></div></div>
         <div class="table-wrap"><table><thead><tr><th>部材</th><th>数量</th></tr></thead><tbody id="quantityBody"><tr><td colspan="2" class="zero">足場を配置すると集計します</td></tr></tbody></table></div>
         <button class="btn outline full" id="csv" disabled>⇩ CSVで保存</button>
-        <p class="disclaimer">高さは1段目の作業床を基準とし、2段目以降は1,900mm間隔、手すりは各作業床の450mm・900mm位置へ内外側とも配置して算出します。支柱は下部支柱を優先し、標準ジャッキベース（AJP）を使用します。発注・施工前に足場業者および有資格者が確認してください。</p>
+        <p class="disclaimer">高さは1段目の作業床を基準とし、2段目以降は1,900mm間隔、足場上部レベルは最上段作業床＋900mmです。手すりは各作業床の450mm・900mm位置へ内外側とも配置して算出します。支柱は下部支柱を優先し、標準ジャッキベース（AJP）を使用します。発注・施工前に足場業者および有資格者が確認してください。</p>
       </section>
       </div>
     </aside>
@@ -132,6 +132,6 @@
     <div><strong>簡易足場拾い</strong><span>© 2026 タイマイオンザライス</span></div>
     <nav><a href="./operator.html">運営者情報</a><a href="./privacy.html">プライバシーポリシー</a></nav>
   </footer>
-  <script type="module" src="./app.js?v=16"></script>
+  <script type="module" src="./app.js?v=17"></script>
 </body>
 </html>
