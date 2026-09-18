@@ -54,6 +54,20 @@ function uniquePostPositions(){
   return[...positions.values()].map(p=>({...p,height:Math.max(0,p.fl-p.baseHeight)}));
 }
 
+function uniquePlanEdges(){
+  const edges=new Map();
+  blocks.forEach(b=>{
+    const c=corners(b),widthRail=b.width===610?600:b.width===914?900:b.width;
+    const horizontalSize=b.rotation===0?b.span:widthRail,verticalSize=b.rotation===0?widthRail:b.span;
+    [[c[0],c[1],horizontalSize],[c[2],c[3],horizontalSize],[c[0],c[2],verticalSize],[c[1],c[3],verticalSize]].forEach(([start,end,size])=>{
+      const a=[Math.round(start[0]*1000),Math.round(start[1]*1000)],z=[Math.round(end[0]*1000),Math.round(end[1]*1000)];
+      const ordered=a[0]<z[0]||(a[0]===z[0]&&a[1]<=z[1])?[a,z]:[z,a],key=ordered[0].join(",")+"|"+ordered[1].join(",");
+      if(!edges.has(key))edges.set(key,{size});
+    });
+  });
+  return[...edges.values()];
+}
+
 function solveColumn(rawHeight){
   const height=Math.round(Math.max(0,Number(rawHeight)||0));
   if(columnPlanCache.has(height))return columnPlanCache.get(height);
@@ -193,10 +207,30 @@ function selectBlocks(ids){
   selectedIds=new Set(ids.filter(id=>blocks.some(b=>b.id===id)));selectedId=[...selectedIds].at(-1)??null;renderBlocks();updateSelectionEditor();
 }
 function selectBlock(id){selectBlocks(id?[id]:[])}
+function renderSelectionSection(block){
+  const preview=$("selectionSectionView"),height=scaffoldHeight(block),levels=Math.max(1,Math.ceil(height/1900));
+  const bottom=126,top=18,left=62,right=188,usable=bottom-top;
+  const floorHeights=Array.from({length:levels},(_,i)=>Math.min((i+1)*1900,height));
+  const floors=floorHeights.map((levelHeight,i)=>{
+    const y=bottom-(levelHeight/Math.max(height,1))*usable;
+    const brace=i%2===0?`<line class="section-brace" x1="${left}" y1="${Math.min(bottom,y+usable/levels)}" x2="${right}" y2="${y}"/>`:`<line class="section-brace" x1="${right}" y1="${Math.min(bottom,y+usable/levels)}" x2="${left}" y2="${y}"/>`;
+    return`${brace}<line class="section-floor" x1="${left}" y1="${y}" x2="${right}" y2="${y}"/><text class="section-level" x="${left-7}" y="${y+3}" text-anchor="end">${levelHeight.toLocaleString()}</text>`;
+  }).join("");
+  preview.innerHTML=`<svg viewBox="0 0 260 160" role="img" aria-label="足場幅 ${block.width}ミリ、高さ ${height}ミリ、${levels}段">
+    <line class="section-ground" x1="38" y1="132" x2="214" y2="132"/>
+    <line class="section-post" x1="${left}" y1="${top}" x2="${left}" y2="${bottom}"/><line class="section-post" x1="${right}" y1="${top}" x2="${right}" y2="${bottom}"/>
+    ${floors}<path class="section-jack" d="M55 132h14l-7-6zm126 0h14l-7-6z"/>
+    <line class="section-dimension" x1="${left}" y1="145" x2="${right}" y2="145"/><path class="section-arrow" d="M62 145l6-3v6zm126 0l-6-3v6z"/>
+    <text class="section-width" x="125" y="156" text-anchor="middle">幅 ${block.width.toLocaleString()} mm</text>
+    <text class="section-height" x="250" y="76" text-anchor="middle" transform="rotate(-90 250 76)">H ${height.toLocaleString()} mm</text>
+    <text class="section-badge" x="202" y="18">${levels}段</text>
+  </svg>`;
+}
 function updateSelectionEditor(){
   const selected=selectedBlocks(),has=selected.length>0;$("selectionEmpty").classList.toggle("hidden",has);$("selectionEditor").classList.toggle("hidden",!has);
   $("selectionBadge").textContent=has?(selected.length===1?"1件選択":selected.length+"件選択"):"未選択";if(!has)return;
   const first=selected[0],same=key=>selected.every(b=>Number(b[key])===Number(first[key]));
+  $("selectionSectionView").classList.toggle("hidden",selected.length!==1);if(selected.length===1)renderSelectionSection(first);
   $("selectedColor").style.background=selected.length===1?COLORS[first.span]:"#e53253";
   $("selectedSpec").textContent=selected.length===1?first.span+" × "+first.width:selected.length+"件の足場";
   document.querySelector(".selected-spec small").textContent=selected.length===1?"mm":"";
@@ -220,13 +254,14 @@ function quantities(){
   if(!blocks.length)return[];
   const levels=b=>Math.max(0,Math.ceil(scaffoldHeight(b)/1900)),posts=uniquePostPositions(),postCount=posts.length;
   const rootTotals=new Map(),workHandrails=new Map(),deckTotals=new Map();
+  uniquePlanEdges().forEach(edge=>rootTotals.set(edge.size,(rootTotals.get(edge.size)||0)+1));
   blocks.forEach(b=>{
-    const count=levels(b);rootTotals.set(b.span,(rootTotals.get(b.span)||0)+2);workHandrails.set(b.span,(workHandrails.get(b.span)||0)+count*2);
+    const count=levels(b);workHandrails.set(b.span,(workHandrails.get(b.span)||0)+count*2);
     const boardWidths=b.width<=610?[490]:b.width<=914?[490,240]:[490,490];
     boardWidths.forEach(boardWidth=>{const key=b.span+"×"+boardWidth;deckTotals.set(key,(deckTotals.get(key)||0)+count)});
   });
   const group=(name,detail="")=>[name,detail,0,"","group"],rows=[group("支柱","支柱位置 "+postCount+"箇所"),...verticalBreakdown(posts),group("根がらみ材")];
-  [...rootTotals].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"根がらみ・両側",count,"本"]));
+  [...rootTotals].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"平面外周（接続部重複なし）",count,"本"]));
   rows.push(group("作業床材"));
   [...workHandrails].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"作業床・両側",count,"本"]));
   [...deckTotals].sort((a,b)=>b[0].localeCompare(a[0],"ja",{numeric:true})).forEach(([size,count])=>rows.push(["布板 "+size,"Sウォーク",count,"枚"]));
