@@ -265,18 +265,21 @@ function updateSummary(){
 function quantities(){
   if(!blocks.length)return[];
   const floorCount=floorCountOf,posts=uniquePostPositions(),postCount=posts.length;
-  const rootTotals=new Map(),workHandrails=new Map(),deckTotals=new Map();
+  const rootTotals=new Map(),workHandrails=new Map(),workBraces=new Map(),deckTotals=new Map();
   uniquePlanEdges().forEach(edge=>rootTotals.set(edge.size,(rootTotals.get(edge.size)||0)+1));
   blocks.forEach(b=>{
-    const count=floorCount(b),handrailSides=(b.outerProtection==="handrail"?1:0)+(b.innerProtection==="handrail"?1:0);workHandrails.set(b.span,(workHandrails.get(b.span)||0)+count*2*handrailSides);
+    const count=floorCount(b),handrailSides=(b.outerProtection==="handrail"?1:0)+(b.innerProtection==="handrail"?1:0),braceSides=(b.outerProtection==="brace"?1:0)+(b.innerProtection==="brace"?1:0);
+    workHandrails.set(b.span,(workHandrails.get(b.span)||0)+count*2*handrailSides);workBraces.set(b.span,(workBraces.get(b.span)||0)+count*braceSides);
     const boardWidths=b.width<=610?[490]:b.width<=914?[490,240]:[490,490];
     boardWidths.forEach(boardWidth=>{const key=b.span+"×"+boardWidth;deckTotals.set(key,(deckTotals.get(key)||0)+count)});
   });
   const group=(name,detail="")=>[name,detail,0,"","group"],rows=[group("支柱","支柱位置 "+postCount+"箇所"),...verticalBreakdown(posts),group("根がらみ材")];
   [...rootTotals].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"平面外周（接続部重複なし）",count,"本"]));
   rows.push(group("作業床材"));
-  [...workHandrails].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"各作業床450/900・内外側",count,"本"]));
   [...deckTotals].sort((a,b)=>b[0].localeCompare(a[0],"ja",{numeric:true})).forEach(([size,count])=>rows.push(["布板 "+size,"Sウォーク",count,"枚"]));
+  rows.push(group("手摺"));
+  [...workHandrails].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"各作業床450/900・手すり設定側",count,"本"]));
+  [...workBraces].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQブレス "+size,"各作業床・ブレス設定側",count,"本"]));
   const stairCount=blocks.reduce((sum,b)=>sum+(b.hasStair&&b.span===1829?Math.max(0,floorCount(b)-1):0),0);
   rows.push(group("昇降"),["階段 1900","IQアルミカイダン19",stairCount,"基"],["階段手すり","IQカイダンレール",stairCount,"本"]);return rows;
 }
