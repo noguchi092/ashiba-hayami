@@ -245,6 +245,21 @@ function selectBlocks(ids){
   selectedIds=new Set(ids.filter(id=>blocks.some(b=>b.id===id)));selectedId=[...selectedIds].at(-1)??null;renderBlocks();updateSelectionEditor();
 }
 function selectBlock(id){selectBlocks(id?[id]:[])}
+function sectionPostAllocation(block){
+  const first=Math.round(firstFloorHeight(block)),parts=[];
+  if(Math.abs(first-700)<=25){
+    parts.push({label:"下部支柱 238",weight:238},{label:"支柱 475",weight:475});
+  }else{
+    const plan=solveColumn(first);
+    if(plan){
+      parts.push({label:"下部支柱 "+plan.lower,weight:plan.lower});
+      plan.regular.forEach(size=>parts.push({label:"支柱 "+size,weight:size}));
+    }else parts.push({label:"下部構成 要確認",weight:Math.max(first,1)});
+  }
+  for(let i=1;i<floorCountOf(block);i++)parts.push({label:"支柱 1900",weight:1900});
+  parts.push({label:"支柱 950",weight:950});
+  return parts;
+}
 function renderSelectionSection(selected){
   const sourceItems=[...(Array.isArray(selected)?selected:[selected])];
   const bounds=sourceItems.map(block=>{const size=dimensions(block);return{block,left:block.x,top:block.y,right:block.x+size.w,bottom:block.y+size.h}}),extentX=Math.max(...bounds.map(v=>v.right))-Math.min(...bounds.map(v=>v.left)),extentY=Math.max(...bounds.map(v=>v.bottom))-Math.min(...bounds.map(v=>v.top)),sectionAxis=extentX>=extentY?"x":"y";
@@ -253,7 +268,7 @@ function renderSelectionSection(selected){
   const preview=$("selectionSectionView"),totalSpan=items.reduce((sum,b)=>sum+sectionLength(b),0);
   const floorLevels=[...new Set(items.flatMap(block=>workFloorHeights(block).map(height=>Number(block.baseHeight||0)+height)))].sort((a,b)=>a-b),buildingLevels=buildingFLs.map(Number).filter(Number.isFinite);
   const minBase=Math.min(...items.map(block=>Number(block.baseHeight||0))),chartMin=Math.min(0,minBase,...buildingLevels),upperLevels=items.map(block=>Number(block.fl)+900),maxUpper=Math.max(...upperLevels,...buildingLevels,chartMin+1);
-  const bottom=138,top=20,left=92,right=252,usable=bottom-top,yAtFL=level=>bottom-((level-chartMin)/(maxUpper-chartMin))*usable;let cursor=left;
+  const bottom=138,top=20,left=92,right=242,usable=bottom-top,yAtFL=level=>bottom-((level-chartMin)/(maxUpper-chartMin))*usable;let cursor=left;
   const bays=items.map((block,index)=>{
     const bayLength=sectionLength(block),x1=cursor,x2=index===items.length-1?right:cursor+(right-left)*bayLength/totalSpan;cursor=x2;
     const base=Number(block.baseHeight||0),blockFloorLevels=workFloorHeights(block).map(height=>base+height);
@@ -261,10 +276,13 @@ function renderSelectionSection(selected){
     return`<line class="section-post" x1="${x1}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x1}" y2="${yAtFL(base)}"/>${index===items.length-1?`<line class="section-post" x1="${x2}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x2}" y2="${yAtFL(base)}"/>`:""}${floors}<circle class="section-post-mark" cx="${x1}" cy="${yAtFL(base)}" r="2.3"/>${index===items.length-1?`<circle class="section-post-mark" cx="${x2}" cy="${yAtFL(base)}" r="2.3"/>`:""}<text class="section-bay-label" x="${(x1+x2)/2}" y="151" text-anchor="middle">${bayLength}</text>`;
   }).join("");
   const floorDimensions=floorLevels.map(level=>{const y=yAtFL(level);return`<line class="section-extension" x1="72" y1="${y}" x2="${left-3}" y2="${y}"/><line class="section-level-tick" x1="69" y1="${y}" x2="75" y2="${y}"/><text class="section-level-label" x="66" y="${y+3}" text-anchor="end">作業床高さ ${level.toLocaleString()}</text>`}).join("");
-  const buildingDimensions=buildingLevels.map((level,index)=>{const y=yAtFL(level);return`<line class="section-building-level" x1="${left-8}" y1="${y}" x2="${right+8}" y2="${y}"/><text class="section-building-level-label" x="${right+11}" y="${y-3}">${index+1}FL ${level.toLocaleString()}mm</text>`}).join("");
+  const buildingDimensions=buildingLevels.map((level,index)=>{const y=yAtFL(level);return`<line class="section-building-level" x1="${left-8}" y1="${y}" x2="${right+8}" y2="${y}"/><rect class="section-building-level-label-bg" x="${right+9}" y="${y-10}" width="48" height="10" rx="2"/><text class="section-building-level-label" x="${right+11}" y="${y-3}">${index+1}FL ${level.toLocaleString()}mm</text>`}).join("");
   const topLevel=Math.max(...upperLevels),topY=yAtFL(topLevel),baseY=yAtFL(minBase),zeroY=yAtFL(0);
   const topLabelY=Math.max(16,topY+2);
-  const svg=`<svg viewBox="0 0 340 178" role="img" aria-label="長手方向 ${items.length}区画、合計${totalSpan}ミリ。作業床高さ、建物FL、支柱割付、足場上部レベルの寸法入り"><defs><marker id="sectionArrow" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 Z" class="section-arrow"/></marker></defs><line class="section-ground" x1="${left-10}" y1="${baseY+3}" x2="${right+10}" y2="${baseY+3}"/><text class="section-surface-label" x="${left-12}" y="${baseY+13}" text-anchor="end">設置面</text>${chartMin<=0&&zeroY>=top&&zeroY<=bottom?`<line class="section-fl-zero" x1="72" y1="${zeroY}" x2="${right+10}" y2="${zeroY}"/><text class="section-fl-zero-label" x="66" y="${zeroY+3}" text-anchor="end">FL 0</text>`:""}${buildingDimensions}${floorDimensions}${bays}<text class="section-post-label" x="${left}" y="${top-3}">支柱割付（${items.length+1}本）</text><line class="section-dimension" x1="278" y1="${baseY}" x2="278" y2="${topY}" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${right+3}" y1="${topY}" x2="282" y2="${topY}"/><line class="section-extension" x1="${right+3}" y1="${baseY}" x2="282" y2="${baseY}"/><text class="section-height" x="288" y="${topLabelY}"><tspan x="288">上部 FL</tspan><tspan x="288" dy="9">${topLevel.toLocaleString()} mm</tspan></text><line class="section-dimension" x1="${left}" y1="160" x2="${right}" y2="160" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${left}" y1="${baseY+3}" x2="${left}" y2="164"/><line class="section-extension" x1="${right}" y1="${baseY+3}" x2="${right}" y2="164"/><text class="section-width" x="${(left+right)/2}" y="174" text-anchor="middle">合計 ${totalSpan.toLocaleString()} mm</text><text class="section-badge" x="${left}" y="11">${items.length}区画・作業床最大${Math.max(...items.map(floorCountOf))}層</text></svg>`;
+  const allocationBlock=items.reduce((best,item)=>Number(item.fl)>Number(best.fl)?item:best,items[0]),allocationParts=sectionPostAllocation(allocationBlock),allocationTotal=allocationParts.reduce((sum,part)=>sum+part.weight,0)||1;
+  let allocationY=baseY;
+  const allocationSvg=allocationParts.map(part=>{const next=allocationY-(baseY-topY)*part.weight/allocationTotal,mid=(allocationY+next)/2,svgPart=`<line class="section-allocation" x1="292" y1="${allocationY}" x2="292" y2="${next}" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-allocation-tick" x1="288" y1="${allocationY}" x2="296" y2="${allocationY}"/><text class="section-allocation-label" x="299" y="${mid+2}">${part.label}</text>`;allocationY=next;return svgPart}).join("")+`<line class="section-allocation-tick" x1="288" y1="${topY}" x2="296" y2="${topY}"/><text class="section-allocation-title" x="288" y="${Math.max(12,topY-6)}">支柱構成</text><text class="section-allocation-label" x="299" y="${baseY+10}">＋標準ジャッキ</text>`;
+  const svg=`<svg viewBox="0 0 420 178" role="img" aria-label="長手方向 ${items.length}区画、合計${totalSpan}ミリ。作業床高さ、建物FL、支柱構成、足場上部レベルの寸法入り"><defs><marker id="sectionArrow" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 Z" class="section-arrow"/></marker></defs><line class="section-ground" x1="${left-10}" y1="${baseY+3}" x2="${right+10}" y2="${baseY+3}"/><text class="section-surface-label" x="${left-12}" y="${baseY+13}" text-anchor="end">設置面</text>${chartMin<=0&&zeroY>=top&&zeroY<=bottom?`<line class="section-fl-zero" x1="72" y1="${zeroY}" x2="${right+10}" y2="${zeroY}"/><text class="section-fl-zero-label" x="66" y="${zeroY+3}" text-anchor="end">FL 0</text>`:""}${buildingDimensions}${floorDimensions}${bays}<text class="section-post-label" x="${left}" y="${top-3}">支柱位置（${items.length+1}箇所）</text>${allocationSvg}<line class="section-dimension" x1="350" y1="${baseY}" x2="350" y2="${topY}" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${right+3}" y1="${topY}" x2="354" y2="${topY}"/><line class="section-extension" x1="${right+3}" y1="${baseY}" x2="354" y2="${baseY}"/><rect class="section-upper-label-bg" x="358" y="${topLabelY-8}" width="58" height="20" rx="2"/><text class="section-height" x="360" y="${topLabelY}"><tspan x="360">上部 FL</tspan><tspan x="360" dy="9">${topLevel.toLocaleString()} mm</tspan></text><line class="section-dimension" x1="${left}" y1="160" x2="${right}" y2="160" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${left}" y1="${baseY+3}" x2="${left}" y2="164"/><line class="section-extension" x1="${right}" y1="${baseY+3}" x2="${right}" y2="164"/><text class="section-width" x="${(left+right)/2}" y="174" text-anchor="middle">合計 ${totalSpan.toLocaleString()} mm</text><text class="section-badge" x="${left}" y="11">${items.length}区画・作業床最大${Math.max(...items.map(floorCountOf))}層</text></svg>`;
   preview.innerHTML=svg;$("sectionModalView").innerHTML=svg;
 }
 function updateSelectionEditor(){
@@ -282,7 +300,8 @@ function updateSelectionEditor(){
   $("selectedActualHeight").textContent=sameUpper?"FL "+upperLevels[0].toLocaleString()+" mm":"複数";
   const tops=selected.map(scaffoldHeight),floorCounts=selected.map(floorCountOf);
   $("selectedLevels").textContent=tops.every(v=>v===tops[0])&&floorCounts.every(v=>v===floorCounts[0])?floorCounts[0]+"層（最上段"+tops[0].toLocaleString()+"mm）":"複数";
-  const stairEligible=selected.every(b=>b.span===1829&&floorCountOf(b)>1),allStairs=stairEligible&&selected.every(b=>b.hasStair);$("toggleStair").classList.remove("hidden");$("toggleStair").disabled=!stairEligible;$("toggleStair").textContent=!stairEligible?"階段は1829・2層以上":allStairs?"選択した足場の階段を解除":"選択した足場を階段付きに変更";
+  $("selectedSpan").value=same("span")?String(first.span):"1829";$("selectedWidth").value=same("width")?String(first.width):"610";
+  $("selectedKind").value=selected.every(b=>b.hasStair)?"stair":"normal";
 }
 function applyElevationChange(key,value){
   if(!selectedIds.size||value==="")return;const number=Number(value);
@@ -497,7 +516,15 @@ $("redo").onclick=()=>{const next=future[0];if(!next)return;history=[...history,
 $("selectedFL").onchange=e=>applyElevationChange("firstFloorFL",e.target.value);
 $("selectedBaseHeight").onchange=e=>applyElevationChange("baseHeight",e.target.value);
 $("selectedFloorCount").onchange=e=>applyElevationChange("floorCount",Math.max(1,Math.round(Number(e.target.value)||1)));
-$("toggleStair").onclick=()=>{const selected=selectedBlocks();if(!selected.length||!selected.every(b=>b.span===1829&&floorCountOf(b)>1))return;const remove=selected.every(b=>b.hasStair);commit(blocks.map(b=>selectedIds.has(b.id)?{...b,hasStair:!remove}:b));updateSelectionEditor();status(remove?selected.length+"件の階段を解除しました":selected.length+"件を階段付き足場に変更しました")};
+$("selectedKind").onchange=e=>{if(e.target.value==="stair")$("selectedSpan").value="1829"};
+$("changeSelected").onclick=()=>{
+  if(!selectedIds.size)return;
+  const nextSpan=Number($("selectedSpan").value),nextWidth=Number($("selectedWidth").value),asStair=$("selectedKind").value==="stair";
+  const selected=selectedBlocks();
+  if(asStair&&selected.some(block=>floorCountOf(block)<2)){status("階段付きへの変更は作業床2層以上で行ってください");return}
+  commit(blocks.map(block=>selectedIds.has(block.id)?{...block,span:asStair?1829:nextSpan,width:nextWidth,hasStair:asStair}:block));
+  updateSelectionEditor();status(selected.length+"件を "+(asStair?"1829 × "+nextWidth+" 階段付き":nextSpan+" × "+nextWidth)+" に変更しました");
+};
 const openSectionModal=()=>{if(selectedIds.size&&!$("sectionModal").open)$("sectionModal").showModal()};
 $("selectionSectionView").onclick=openSectionModal;
 $("selectionSectionView").onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openSectionModal()}};
