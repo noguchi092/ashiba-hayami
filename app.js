@@ -438,6 +438,41 @@ function quantities(){
   const stairCount=stairOpeningCount;
   rows.push(group("昇降"),["階段 1900","IQアルミカイダン19",stairCount,"基"],["階段手すり","IQカイダンレール",stairCount,"本"]);return rows;
 }
+function csvQuantityMatrix(){
+  const maxFloors=Math.max(1,...blocks.map(floorCountOf)),columns=["支柱","根がらみ材"];
+  for(let stageIndex=0;stageIndex<maxFloors;stageIndex++){
+    columns.push(`${stageIndex+1}段目 作業床`,`${stageIndex+1}段目 手摺`);
+    if(stageIndex<maxFloors-1)columns.push(`${stageIndex+1}→${stageIndex+2}段目 昇降`);
+  }
+  const records=new Map(),add=(name,detail,unit,column,quantity)=>{
+    if(!records.has(name))records.set(name,{name,detail,unit,values:new Map()});
+    const record=records.get(name);record.values.set(column,(record.values.get(column)||0)+quantity);
+  };
+  verticalBreakdown(uniquePostPositions()).forEach(([name,detail,quantity,unit])=>add(name,detail,unit,"支柱",quantity));
+  uniquePlanEdges().forEach(edge=>add(`IQ手すり ${edge.size}`,"IQ手すり","本","根がらみ材",1));
+  for(let stageIndex=0;stageIndex<maxFloors;stageIndex++){
+    const stageBlocks=blocks.filter(block=>floorCountOf(block)>stageIndex),floorColumn=`${stageIndex+1}段目 作業床`,railColumn=`${stageIndex+1}段目 手摺`;
+    uniquePlanEdges(stageBlocks).forEach(edge=>add(`IQ手すり ${edge.size}`,"IQ手すり","本",floorColumn,1));
+    stageBlocks.forEach(block=>{
+      const boardWidths=block.width<=610?[490]:block.width<=914?[490,240]:[490,490],boardLanes=new Map();
+      boardWidths.forEach(boardWidth=>boardLanes.set(boardWidth,(boardLanes.get(boardWidth)||0)+1));
+      const hasStairOpening=block.hasStair&&block.span===1829&&stageIndex<floorCountOf(block)-1;
+      boardLanes.forEach((lanes,boardWidth)=>add(`布板 ${block.span}×${boardWidth}`,"Sウォーク","枚",floorColumn,Math.max(0,lanes-(boardWidth===490&&hasStairOpening?1:0))));
+      const handrailSides=(block.outerProtection==="handrail"?1:0)+(block.innerProtection==="handrail"?1:0),braceSides=(block.outerProtection==="brace"?1:0)+(block.innerProtection==="brace"?1:0);
+      add(`IQ手すり ${block.span}`,"IQ手すり","本",railColumn,2*handrailSides);add(`IQブレス ${block.span}`,"IQブレス","本",railColumn,braceSides);
+    });
+    exposedEndEdges(stageBlocks).forEach(edge=>add(`IQ手すり ${edge.size}`,"IQ手すり","本",railColumn,2));
+    if(stageIndex<maxFloors-1){
+      const stairColumn=`${stageIndex+1}→${stageIndex+2}段目 昇降`,stairCount=blocks.filter(block=>block.hasStair&&block.span===1829&&floorCountOf(block)>stageIndex+1).length;
+      add("階段 1900","IQアルミカイダン19","基",stairColumn,stairCount);add("階段手すり","IQカイダンレール","本",stairColumn,stairCount);
+    }
+  }
+  const header=["部材名","規格・条件",...columns,"合計","単位"],rows=[...records.values()].map(record=>{
+    const values=columns.map(column=>record.values.get(column)||0),total=values.reduce((sum,value)=>sum+value,0);
+    return[record.name,record.detail,...values.map(value=>value||""),total,record.unit];
+  });
+  return{header,rows};
+}
 function renderLevelRows(){
   const wrap=$("levelRows");if(!wrap)return;
   buildingFLs=buildingFLs.length?buildingFLs:[0];
@@ -648,7 +683,7 @@ document.addEventListener("keydown",e=>{
 });
 $("saveProject").onclick=saveProjectZip;
 $("projectInput").onchange=async e=>{const file=e.target.files[0];if(!file)return;try{await loadProjectFile(file)}catch(error){console.error(error);status("プロジェクトデータを読み込めませんでした")}finally{e.target.value=""}};
-$("csv").onclick=()=>{const rows=[["部材名","規格・条件","数量","単位"],...quantities().map(r=>r[4]==="group"?[r[0],r[1],"",""]:r.slice(0,4))],csv="\ufeff"+rows.map(r=>r.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(",")).join("\r\n");download("足場概算数量.csv",csv,"text/csv;charset=utf-8")};
+$("csv").onclick=()=>{const matrix=csvQuantityMatrix(),rows=[matrix.header,...matrix.rows],csv="\ufeff"+rows.map(r=>r.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(",")).join("\r\n");download("足場概算数量.csv",csv,"text/csv;charset=utf-8")};
 $("print").onclick=()=>window.print();
 
 try{
