@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="PDF図面上にIQ足場を配置し、基本部材の概算数量を拾えるツールです。">
   <title>簡易足場拾い｜IQ足場の概算数量</title>
-  <link rel="stylesheet" href="./style.css?v=20">
+  <link rel="stylesheet" href="./style.css?v=28">
 </head>
 <body>
   <header class="topbar">
@@ -117,7 +117,15 @@
           <div class="selected-floor-count"><label>作業床層数</label><input id="selectedFloorCount" type="number" min="1" step="1"></div>
           <p class="actual-height">足場上部レベル <strong id="selectedActualHeight">FL 0 mm</strong></p>
           <p class="levels">作業床構成 <strong id="selectedLevels">1層</strong></p>
-          <button id="toggleStair" class="stair-toggle" type="button">階段を追加</button>
+          <div class="selection-change">
+            <strong>選択した足場を変更</strong>
+            <div class="selection-change-grid">
+              <div><label>スパン</label><select id="selectedSpan"><option>1829</option><option>1524</option><option>1219</option><option>914</option><option>610</option></select></div>
+              <div><label>足場幅</label><select id="selectedWidth"><option>610</option><option>914</option><option>1219</option></select></div>
+              <div><label>種類</label><select id="selectedKind"><option value="normal">通常足場</option><option value="stair">階段付き</option></select></div>
+            </div>
+            <button id="changeSelected" class="stair-toggle" type="button">選択内容に変更</button>
+          </div>
           <div class="selection-actions"><button id="rotate">↻ 回転</button><button id="duplicate">⧉ 複製</button><button id="remove" class="danger">削除</button></div>
         </div>
       </section>
@@ -136,14 +144,14 @@
     <div class="section-modal-card">
       <div class="section-modal-head"><h2 id="sectionModalTitle">足場断面図（長手方向）</h2><button id="closeSectionModal" type="button" aria-label="拡大断面図を閉じる">×</button></div>
       <div class="section-modal-view" id="sectionModalView"></div>
-      <p>作業床高さは左側、建物FLと足場上部レベルは右側に表示しています。</p>
+      <p>作業床高さは左側、建物FL・足場上部レベル・支柱構成は右側に分けて表示しています。</p>
     </div>
   </dialog>
   <footer class="page-footer">
-    <div><strong>簡易足場拾い</strong><span>© 2026 タイマイオンザライス</span></div>
+    <div><strong>簡易足場拾い</strong><span>© 2026 株式会社ダイトク</span></div>
     <nav><a href="./operator.html">運営者情報</a><a href="./privacy.html">プライバシーポリシー</a></nav>
   </footer>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script type="module" src="./app.js?v=27"></script>
+  <script type="module" src="./app.js?v=28"></script>
 </body>
 </html>
