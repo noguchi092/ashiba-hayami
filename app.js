@@ -4,6 +4,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs
 const $ = id => document.getElementById(id);
 const COLORS = {1829:"#1684f8",1524:"#00a88f",1219:"#6f63e8",914:"#e88b18",610:"#dd4e68"};
 const POST_SIZES=[3800,2850,1900,1425,950,475],LOWER_POST_SIZES=[2750,1425,950,475,238];
+const RAIL_SIZES=[1829,1524,1219,1107,914,722,610,360,305,250],DECK_LENGTHS=[1829,1524,1219,914,610],DECK_WIDTHS=[490,240];
 const BASE_SCALE = 1.25, KEY = "ashiba-hayami-v1";
 const columnPlanCache=new Map();
 let blocks=[],history=[],future=[],selectedId=null,selectedIds=new Set(),tool="add",placementStair=false;
@@ -444,10 +445,19 @@ function csvQuantityMatrix(){
     columns.push(`${stageIndex+1}段目 作業床`,`${stageIndex+1}段目 手摺`);
     if(stageIndex<maxFloors-1)columns.push(`${stageIndex+1}→${stageIndex+2}段目 昇降`);
   }
-  const records=new Map(),add=(name,detail,unit,column,quantity)=>{
+  const records=new Map(),ensure=(name,detail,unit)=>{
     if(!records.has(name))records.set(name,{name,detail,unit,values:new Map()});
-    const record=records.get(name);record.values.set(column,(record.values.get(column)||0)+quantity);
+    return records.get(name);
+  },add=(name,detail,unit,column,quantity)=>{
+    const record=ensure(name,detail,unit);record.values.set(column,(record.values.get(column)||0)+quantity);
   };
+  LOWER_POST_SIZES.forEach(size=>ensure(`下部支柱 ${size}`,"IQ下部支柱","本"));
+  POST_SIZES.forEach(size=>ensure(`支柱 ${size}`,"IQ支柱","本"));
+  ensure("HPJ5-450","標準ジャッキベース（AJP）","本");
+  RAIL_SIZES.forEach(size=>ensure(`IQ手すり ${size}`,"IQ手すり","本"));
+  DECK_LENGTHS.forEach(length=>DECK_WIDTHS.forEach(boardWidth=>ensure(`布板 ${length}×${boardWidth}`,"Sウォーク","枚")));
+  Object.keys(COLORS).map(Number).forEach(size=>ensure(`IQブレス ${size}`,"IQブレス","本"));
+  ensure("階段 1900","IQアルミカイダン19","基");ensure("階段手すり","IQカイダンレール","本");
   verticalBreakdown(uniquePostPositions()).forEach(([name,detail,quantity,unit])=>add(name,detail,unit,"支柱",quantity));
   uniquePlanEdges().forEach(edge=>add(`IQ手すり ${edge.size}`,"IQ手すり","本","根がらみ材",1));
   for(let stageIndex=0;stageIndex<maxFloors;stageIndex++){
