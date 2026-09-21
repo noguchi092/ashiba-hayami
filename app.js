@@ -412,13 +412,15 @@ function updateSummary(){
 function quantities(){
   if(!blocks.length)return[];
   const floorCount=floorCountOf,posts=uniquePostPositions(),postCount=posts.length;
-  const rootTotals=new Map(),floorRailTotals=new Map(),workHandrails=new Map(),workBraces=new Map(),deckTotals=new Map(),floorLayers=new Map();
+  const rootTotals=new Map(),floorRailTotals=new Map(),workHandrails=new Map(),workBraces=new Map(),deckTotals=new Map(),floorLayers=new Map();let stairOpeningCount=0;
   uniquePlanEdges().forEach(edge=>rootTotals.set(edge.size,(rootTotals.get(edge.size)||0)+1));
   blocks.forEach(b=>{
     const count=floorCount(b),handrailSides=(b.outerProtection==="handrail"?1:0)+(b.innerProtection==="handrail"?1:0),braceSides=(b.outerProtection==="brace"?1:0)+(b.innerProtection==="brace"?1:0);
     workHandrails.set(b.span,(workHandrails.get(b.span)||0)+count*2*handrailSides);workBraces.set(b.span,(workBraces.get(b.span)||0)+count*braceSides);
-    const boardWidths=b.width<=610?[490]:b.width<=914?[490,240]:[490,490];
-    boardWidths.forEach(boardWidth=>{const key=b.span+"×"+boardWidth;deckTotals.set(key,(deckTotals.get(key)||0)+count)});
+    const boardWidths=b.width<=610?[490]:b.width<=914?[490,240]:[490,490],boardLanes=new Map();
+    boardWidths.forEach(boardWidth=>boardLanes.set(boardWidth,(boardLanes.get(boardWidth)||0)+1));
+    const stairOpenings=b.hasStair&&b.span===1829?Math.max(0,count-1):0;stairOpeningCount+=stairOpenings;
+    boardLanes.forEach((lanes,boardWidth)=>{const key=b.span+"×"+boardWidth,quantity=Math.max(0,count*lanes-(boardWidth===490?stairOpenings:0));deckTotals.set(key,(deckTotals.get(key)||0)+quantity)});
     for(let i=0;i<count;i++){const level=Number(b.firstFloorFL)+i*1900;if(!floorLayers.has(level))floorLayers.set(level,[]);floorLayers.get(level).push(b)}
   });
   floorLayers.forEach(layerBlocks=>{
@@ -429,11 +431,11 @@ function quantities(){
   [...rootTotals].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"平面外周（接続部重複なし）",count,"本"]));
   rows.push(group("作業床材"));
   [...floorRailTotals].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"作業床受け（同一床・接続部重複なし）",count,"本"]));
-  [...deckTotals].sort((a,b)=>b[0].localeCompare(a[0],"ja",{numeric:true})).forEach(([size,count])=>rows.push(["布板 "+size,"Sウォーク",count,"枚"]));
+  [...deckTotals].sort((a,b)=>b[0].localeCompare(a[0],"ja",{numeric:true})).forEach(([size,count])=>rows.push(["布板 "+size,size==="1829×490"&&stairOpeningCount?"Sウォーク（階段開口 "+stairOpeningCount+"枚控除）":"Sウォーク",count,"枚"]));
   rows.push(group("手摺"));
   [...workHandrails].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"各作業床450/900・長手／端部",count,"本"]));
   [...workBraces].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQブレス "+size,"各作業床・ブレス設定側",count,"本"]));
-  const stairCount=blocks.reduce((sum,b)=>sum+(b.hasStair&&b.span===1829?Math.max(0,floorCount(b)-1):0),0);
+  const stairCount=stairOpeningCount;
   rows.push(group("昇降"),["階段 1900","IQアルミカイダン19",stairCount,"基"],["階段手すり","IQカイダンレール",stairCount,"本"]);return rows;
 }
 function renderLevelRows(){
