@@ -9,6 +9,7 @@ const columnPlanCache=new Map();
 let blocks=[],history=[],future=[],selectedId=null,selectedIds=new Set(),tool="add",placementStair=false;
 let span=1829,width=610,defaultFL=700,buildingFLs=[0],defaultBaseHeight=0,defaultFloorCount=1,drawingScale=100,mmPerPx=28.222,zoom=1;
 let pdfDoc=null,pdfSourceBytes=null,pdfSourceName="",pageNumber=1,pageCount=0,baseStage={width:1120,height:760};
+let jwwDoc=null,jwwRuntimePromise=null,jwwView=null,drawingKind=null;
 let calibrationPoints=[],drag=null,range=null,series=null,resize=null,pan=null,renderTask=null,fitOnNextRender=false,panelCollapsed=true,suppressNextClick=false;
 let wheelTimer=null,pendingWheelZoom=null,wheelAnchor=null,levelApplyTimer=null;
 
@@ -153,12 +154,98 @@ function snapBlock(candidate,excludeId=null){
 async function loadPdf(file){
   try{
     status("PDFを読み込んでいます…");
-    const source=new Uint8Array(await file.arrayBuffer());pdfSourceBytes=source.slice();pdfSourceName=file.name||"drawing.pdf";
+    const source=new Uint8Array(await file.arrayBuffer());pdfSourceBytes=source.slice();pdfSourceName=file.name||"drawing.pdf";drawingKind="pdf";jwwDoc=null;jwwView=null;
     pdfDoc=await pdfjsLib.getDocument({data:source}).promise;
     pageCount=pdfDoc.numPages;pageNumber=1;$("pdfName").textContent=file.name;$("pdfHelp").textContent=pageCount+"ページ";
     $("pageNav").classList.toggle("hidden",pageCount<2);mmPerPx=drawingScale*(25.4/72)/BASE_SCALE;fitOnNextRender=true;
     await renderPdf();setSectionOpen("drawingSection",false);setSectionOpen("scaleSection",true);status(file.name+" を読み込みました（全体表示）");
   }catch(error){console.error(error);status("PDFを読み込めませんでした。別のPDFでお試しください")}
+}
+
+const JWW_WASM_URL="https://cdn.jsdelivr.net/gh/ArchivierteRepositories/jww-parser@b919877eb4d1ae9fa0b773d70025f27f8316ea48/wasm/public/jww-parser.wasm";
+async function ensureJwwRuntime(){
+  if(typeof window.jwwParse==="function")return;
+  if(jwwRuntimePromise)return jwwRuntimePromise;
+  jwwRuntimePromise=(async()=>{
+    if(typeof window.Go!=="function")throw new Error("JWW解析機能を読み込めませんでした");
+    const go=new window.Go(),response=await fetch(JWW_WASM_URL);
+    if(!response.ok)throw new Error("JWW解析データを取得できませんでした");
+    const bytes=await response.arrayBuffer(),result=await WebAssembly.instantiate(bytes,go.importObject);
+    go.run(result.instance);
+    for(let i=0;i<50&&typeof window.jwwParse!=="function";i++)await new Promise(resolve=>setTimeout(resolve,20));
+    if(typeof window.jwwParse!=="function")throw new Error("JWW解析機能を開始できませんでした");
+  })();
+  try{await jwwRuntimePromise}catch(error){jwwRuntimePromise=null;throw error}
+}
+const numberOf=(value,fallback=0)=>Number.isFinite(Number(value))?Number(value):fallback;
+function transformJwwEntity(entity,transform={x:0,y:0,sx:1,sy:1,rotation:0}){
+  const point=(x,y)=>{const px=numberOf(x)*transform.sx,py=numberOf(y)*transform.sy,c=Math.cos(transform.rotation),s=Math.sin(transform.rotation);return{x:transform.x+px*c-py*s,y:transform.y+px*s+py*c}};
+  const result={...entity};
+  [["StartX","StartY"],["EndX","EndY"],["CenterX","CenterY"],["X","Y"],["Point1X","Point1Y"],["Point2X","Point2Y"],["Point3X","Point3Y"],["Point4X","Point4Y"]].forEach(([xKey,yKey])=>{
+    if(xKey in entity&&yKey in entity){const p=point(entity[xKey],entity[yKey]);result[xKey]=p.x;result[yKey]=p.y}
+  });
+  if("Radius" in result)result.Radius=Math.abs(numberOf(result.Radius)*transform.sx);
+  if("Flatness" in result)result.Flatness=numberOf(result.Flatness,1)*Math.abs(transform.sy/transform.sx);
+  if("TiltAngle" in result)result.TiltAngle=numberOf(result.TiltAngle)+transform.rotation;
+  if("Angle" in result&&"Content" in result)result.Angle=numberOf(result.Angle)+transform.rotation*180/Math.PI;
+  return result;
+}
+function flattenJwwDocument(doc){
+  const defs=new Map((doc.BlockDefs||[]).map(def=>[Number(def.Number),def])),output=[];
+  const visit=(entities,transform={x:0,y:0,sx:1,sy:1,rotation:0},depth=0)=>{
+    if(depth>8)return;
+    (entities||[]).forEach(entity=>{
+      if("DefNumber" in entity){
+        const ref=transformJwwEntity({X:entity.RefX,Y:entity.RefY},transform),def=defs.get(Number(entity.DefNumber));
+        if(def)visit(def.Entities,{x:ref.X,y:ref.Y,sx:transform.sx*numberOf(entity.ScaleX,1),sy:transform.sy*numberOf(entity.ScaleY,1),rotation:transform.rotation+numberOf(entity.Rotation)},depth+1);
+      }else output.push(transformJwwEntity(entity,transform));
+    });
+  };
+  visit(doc.Entities);return output;
+}
+function jwwEntityPoints(entity){
+  if("StartX" in entity&&"EndX" in entity)return[[entity.StartX,entity.StartY],[entity.EndX,entity.EndY]];
+  if("CenterX" in entity&&"Radius" in entity){
+    const points=[],steps=entity.IsFullCircle?72:Math.max(12,Math.ceil(Math.abs(numberOf(entity.ArcAngle))*18/Math.PI)),start=numberOf(entity.StartAngle),arc=entity.IsFullCircle?Math.PI*2:numberOf(entity.ArcAngle),tilt=numberOf(entity.TiltAngle),flat=numberOf(entity.Flatness,1),radius=Math.abs(numberOf(entity.Radius));
+    for(let i=0;i<=steps;i++){const a=start+arc*i/steps,x=radius*Math.cos(a),y=radius*flat*Math.sin(a),c=Math.cos(tilt),s=Math.sin(tilt);points.push([numberOf(entity.CenterX)+x*c-y*s,numberOf(entity.CenterY)+x*s+y*c])}return points;
+  }
+  if("Point1X" in entity)return[[entity.Point1X,entity.Point1Y],[entity.Point2X,entity.Point2Y],[entity.Point3X,entity.Point3Y],[entity.Point4X,entity.Point4Y]];
+  if("X" in entity)return[[entity.X,entity.Y]];
+  return[];
+}
+function prepareJwwView(doc){
+  const entities=flattenJwwDocument(doc),allPoints=entities.flatMap(jwwEntityPoints);
+  entities.filter(entity=>"Content" in entity).forEach(entity=>allPoints.push([entity.StartX,entity.StartY],[entity.EndX,entity.EndY]));
+  if(!allPoints.length)throw new Error("表示できる線や文字がありません");
+  const xs=allPoints.map(point=>numberOf(point[0])),ys=allPoints.map(point=>numberOf(point[1])),minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys),worldWidth=Math.max(1,maxX-minX),worldHeight=Math.max(1,maxY-minY),margin=36;
+  baseStage={width:1120,height:760};const scale=Math.min((baseStage.width-margin*2)/worldWidth,(baseStage.height-margin*2)/worldHeight);
+  mmPerPx=1/scale;
+  return{entities,minX,maxX,minY,maxY,scale,offsetX:(baseStage.width-worldWidth*scale)/2,offsetY:(baseStage.height-worldHeight*scale)/2};
+}
+function renderJww(){
+  if(!jwwDoc||!jwwView)return;
+  const ratio=window.devicePixelRatio||1,viewWidth=baseStage.width*zoom,viewHeight=baseStage.height*zoom,ctx=canvas.getContext("2d"),map=(x,y)=>({x:(jwwView.offsetX+(numberOf(x)-jwwView.minX)*jwwView.scale)*zoom,y:(jwwView.offsetY+(jwwView.maxY-numberOf(y))*jwwView.scale)*zoom});
+  stage.style.width=viewWidth+"px";stage.style.height=viewHeight+"px";canvas.width=Math.floor(viewWidth*ratio);canvas.height=Math.floor(viewHeight*ratio);canvas.style.width=viewWidth+"px";canvas.style.height=viewHeight+"px";ctx.setTransform(ratio,0,0,ratio,0,0);ctx.fillStyle="#fff";ctx.fillRect(0,0,viewWidth,viewHeight);ctx.lineCap="round";ctx.lineJoin="round";
+  jwwView.entities.forEach(entity=>{
+    const points=jwwEntityPoints(entity),lineWidth=Math.max(.55,Math.min(2.2,numberOf(entity.PenWidth,1)/5))*zoom;ctx.strokeStyle="#263b4c";ctx.fillStyle="#263b4c";ctx.lineWidth=lineWidth;
+    if("Content" in entity){const p=map(entity.StartX,entity.StartY),size=Math.max(6,Math.min(24,numberOf(entity.SizeY,3)*jwwView.scale*zoom));ctx.save();ctx.translate(p.x,p.y);ctx.rotate(-numberOf(entity.Angle)*Math.PI/180);ctx.font=`${size}px sans-serif`;ctx.textBaseline="alphabetic";ctx.fillText(String(entity.Content||""),0,0);ctx.restore();return}
+    if("Point1X" in entity&&points.length){ctx.beginPath();points.forEach((point,index)=>{const p=map(point[0],point[1]);index?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)});ctx.closePath();ctx.fillStyle="#9bacb833";ctx.fill();ctx.stroke();return}
+    if("X" in entity&&points.length){const p=map(points[0][0],points[0][1]),r=3*zoom;ctx.beginPath();ctx.moveTo(p.x-r,p.y);ctx.lineTo(p.x+r,p.y);ctx.moveTo(p.x,p.y-r);ctx.lineTo(p.x,p.y+r);ctx.stroke();return}
+    if(points.length>1){ctx.beginPath();points.forEach((point,index)=>{const p=map(point[0],point[1]);index?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y)});if(entity.IsFullCircle)ctx.closePath();ctx.stroke()}
+  });
+  canvas.classList.add("visible");$("emptyPlan").classList.add("hidden");setStageSize();
+}
+async function loadJww(file){
+  try{
+    status("JWW解析機能を準備しています…");await ensureJwwRuntime();status("JWW図面を読み込んでいます…");
+    const source=new Uint8Array(await file.arrayBuffer()),result=window.jwwParse(source);
+    if(!result?.ok||!result.data)throw new Error(result?.error||"JWWを解析できませんでした");
+    const doc=JSON.parse(result.data);try{renderTask?.cancel?.()}catch{}pdfDoc=null;renderTask=null;jwwDoc=doc;jwwView=prepareJwwView(doc);drawingKind="jww";pdfSourceBytes=source.slice();pdfSourceName=file.name||"drawing.jww";pageNumber=1;pageCount=1;$("pageNav").classList.add("hidden");$("pdfName").textContent=pdfSourceName;$("pdfHelp").textContent=(doc.Entities?.length||0).toLocaleString()+"要素・JWW Ver."+(doc.Version||"-");fitOnNextRender=true;
+    const scroll=$("canvasScroll");zoom=Math.max(.35,Math.min(2.5,(scroll.clientWidth-32)/baseStage.width,(scroll.clientHeight-32)/baseStage.height));fitOnNextRender=false;$("zoomLabel").textContent=Math.round(zoom*100)+"%";renderJww();renderBlocks();setSectionOpen("drawingSection",false);setSectionOpen("scaleSection",true);status(pdfSourceName+" を読み込みました（JWW・実寸座標）");
+  }catch(error){console.error(error);status("JWWを読み込めませんでした。Jw_cadで保存し直してお試しください")}
+}
+async function loadDrawingFile(file){
+  const lower=file.name.toLowerCase();if(lower.endsWith(".jww"))return loadJww(file);return loadPdf(file);
 }
 async function renderPdf(){
   if(!pdfDoc)return;try{renderTask?.cancel?.()}catch{}
@@ -180,7 +267,7 @@ async function renderPdf(){
 async function fitToView(){
   const scroll=$("canvasScroll");
   zoom=Math.max(.35,Math.min(2.5,(scroll.clientWidth-32)/baseStage.width,(scroll.clientHeight-32)/baseStage.height));
-  $("zoomLabel").textContent=Math.round(zoom*100)+"%";pdfDoc?await renderPdf():setStageSize();
+  $("zoomLabel").textContent=Math.round(zoom*100)+"%";pdfDoc?await renderPdf():jwwDoc?renderJww():setStageSize();
 }
 function setStageSize(){
   stage.style.width=baseStage.width*zoom+"px";stage.style.height=baseStage.height*zoom+"px";renderBlocks();renderCalibration();
@@ -189,7 +276,7 @@ async function applyZoom(nextZoom,anchor=null){
   const next=Math.max(.35,Math.min(2.5,+nextZoom.toFixed(2)));if(next===zoom)return;
   const rect=canvasScroll.getBoundingClientRect(),localX=anchor?anchor.clientX-rect.left:canvasScroll.clientWidth/2,localY=anchor?anchor.clientY-rect.top:canvasScroll.clientHeight/2;
   const contentX=canvasScroll.scrollLeft+localX,contentY=canvasScroll.scrollTop+localY,previous=zoom;zoom=next;
-  $("zoomLabel").textContent=Math.round(zoom*100)+"%";pdfDoc?await renderPdf():setStageSize();
+  $("zoomLabel").textContent=Math.round(zoom*100)+"%";pdfDoc?await renderPdf():jwwDoc?renderJww():setStageSize();
   const factor=zoom/previous;canvasScroll.scrollLeft=Math.max(0,contentX*factor-localX);canvasScroll.scrollTop=Math.max(0,contentY*factor-localY);
 }
 function renderBlocks(){
@@ -380,12 +467,12 @@ function applyProjectData(data){
 }
 async function saveProjectZip(){
   try{
-    if(!window.JSZip)throw new Error("ZIP機能を読み込めませんでした");status("PDFと配置データをZIPへ保存しています…");
-    const zip=new window.JSZip(),safePdfName=(pdfSourceName||"drawing.pdf").replace(/[\\/:*?"<>|]/g,"_"),pdfPath=pdfSourceBytes?"drawing/"+safePdfName:null;
-    const data={version:6,blocks,mmPerPx,drawingScale,defaultFL,buildingFLs,defaultBaseHeight,defaultFloorCount,panelCollapsed,pageNumber,savedAt:new Date().toISOString(),pdf:pdfPath?{name:pdfSourceName,path:pdfPath,pageNumber}:null};
-    zip.file("project.json",JSON.stringify(data,null,2));if(pdfPath)zip.file(pdfPath,pdfSourceBytes,{binary:true,compression:"STORE"});
+    if(!window.JSZip)throw new Error("ZIP機能を読み込めませんでした");status("元図面と配置データをZIPへ保存しています…");
+    const fallbackName=drawingKind==="jww"?"drawing.jww":"drawing.pdf",zip=new window.JSZip(),safeSourceName=(pdfSourceName||fallbackName).replace(/[\\/:*?"<>|]/g,"_"),sourcePath=pdfSourceBytes?"drawing/"+safeSourceName:null,drawing=sourcePath?{name:pdfSourceName,path:sourcePath,kind:drawingKind||"pdf",pageNumber}:null;
+    const data={version:7,blocks,mmPerPx,drawingScale,defaultFL,buildingFLs,defaultBaseHeight,defaultFloorCount,panelCollapsed,pageNumber,savedAt:new Date().toISOString(),drawing,pdf:drawing?.kind==="pdf"?drawing:null};
+    zip.file("project.json",JSON.stringify(data,null,2));if(sourcePath)zip.file(sourcePath,pdfSourceBytes,{binary:true,compression:"STORE"});
     const blob=await zip.generateAsync({type:"blob",compression:"DEFLATE",compressionOptions:{level:6}});downloadBlob("足場拾いプロジェクト.zip",blob);
-    status(pdfPath?"PDFを含むプロジェクトZIPを保存しました":"配置データをプロジェクトZIPへ保存しました（PDF未読込）");
+    status(sourcePath?(drawingKind==="jww"?"JWWを含むプロジェクトZIPを保存しました":"PDFを含むプロジェクトZIPを保存しました"):"配置データをプロジェクトZIPへ保存しました（図面未読込）");
   }catch(error){console.error(error);status("ZIPを保存できませんでした")}
 }
 async function loadProjectFile(file){
@@ -394,12 +481,12 @@ async function loadProjectFile(file){
   if(!window.JSZip)throw new Error("ZIP機能を読み込めませんでした");status("プロジェクトZIPを読み込んでいます…");
   const zip=await window.JSZip.loadAsync(file),projectEntry=zip.file("project.json")||Object.values(zip.files).find(entry=>!entry.dir&&entry.name.toLowerCase().endsWith(".json"));
   if(!projectEntry)throw new Error("project.jsonがありません");const data=JSON.parse(await projectEntry.async("text"));applyProjectData(data);
-  const pdfEntry=(data.pdf?.path&&zip.file(data.pdf.path))||Object.values(zip.files).find(entry=>!entry.dir&&entry.name.toLowerCase().endsWith(".pdf"));
-  if(pdfEntry){
-    const bytes=await pdfEntry.async("uint8array"),name=data.pdf?.name||pdfEntry.name.split("/").at(-1)||"drawing.pdf";await loadPdf(new File([bytes],name,{type:"application/pdf"}));
-    if(Number.isFinite(data.mmPerPx))mmPerPx=data.mmPerPx;pageNumber=Math.max(1,Math.min(pageCount,Math.round(data.pdf?.pageNumber||data.pageNumber||1)));if(pageNumber!==1)await renderPdf();renderBlocks();updateSummary();
+  const drawingMeta=data.drawing||data.pdf,sourceEntry=(drawingMeta?.path&&zip.file(drawingMeta.path))||Object.values(zip.files).find(entry=>!entry.dir&&/\.(pdf|jww)$/i.test(entry.name));
+  if(sourceEntry){
+    const bytes=await sourceEntry.async("uint8array"),name=drawingMeta?.name||sourceEntry.name.split("/").at(-1)||"drawing.pdf",kind=drawingMeta?.kind||(name.toLowerCase().endsWith(".jww")?"jww":"pdf");await loadDrawingFile(new File([bytes],name,{type:kind==="pdf"?"application/pdf":"application/octet-stream"}));
+    if(Number.isFinite(data.mmPerPx))mmPerPx=data.mmPerPx;if(kind==="pdf"){pageNumber=Math.max(1,Math.min(pageCount,Math.round(drawingMeta?.pageNumber||data.pageNumber||1)));if(pageNumber!==1)await renderPdf()}else renderJww();renderBlocks();updateSummary();
   }
-  status(pdfEntry?"PDFと足場配置を復元しました":"足場配置を復元しました（ZIP内にPDFはありません）");
+  status(sourceEntry?(drawingKind==="jww"?"JWWと足場配置を復元しました":"PDFと足場配置を復元しました"):"足場配置を復元しました（ZIP内に図面はありません）");
 }
 function removeSelected(){
   if(!selectedIds.size)return;
@@ -409,9 +496,9 @@ function removeSelected(){
   status(count+"件の足場を削除しました（元に戻すことができます）");
 }
 
-$("pdfInput").addEventListener("change",e=>e.target.files[0]&&loadPdf(e.target.files[0]));
+$("pdfInput").addEventListener("change",e=>e.target.files[0]&&loadDrawingFile(e.target.files[0]));
 document.querySelector(".pdf-drop").addEventListener("dragover",e=>e.preventDefault());
-document.querySelector(".pdf-drop").addEventListener("drop",e=>{e.preventDefault();const f=e.dataTransfer.files[0];if(f?.type==="application/pdf")loadPdf(f)});
+document.querySelector(".pdf-drop").addEventListener("drop",e=>{e.preventDefault();const f=e.dataTransfer.files[0];if(f&&(/\.(pdf|jww)$/i.test(f.name)||f.type==="application/pdf"))loadDrawingFile(f)});
 $("prevPage").onclick=async()=>{if(pageNumber>1){pageNumber--;fitOnNextRender=true;await renderPdf()}};
 $("nextPage").onclick=async()=>{if(pageNumber<pageCount){pageNumber++;fitOnNextRender=true;await renderPdf()}};
 $("drawingScale").onchange=e=>{drawingScale=Number(e.target.value);mmPerPx=drawingScale*(25.4/72)/BASE_SCALE;calibrationPoints=[];saveLocal();renderBlocks();renderCalibration();status("図面縮尺を 1/"+drawingScale+" に設定しました")};
