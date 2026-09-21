@@ -55,6 +55,9 @@ html,body{min-height:100%;overflow-x:hidden}.workspace{height:calc(100svh - 66px
 /* v9: 概算数量の部材区分 */
 .quantity-group th{position:static;padding:9px 10px;border-top:2px solid #cbd9e4;background:#eaf2f8;color:#173b5a;text-align:left;font-size:12px;font-weight:800}.quantity-group:first-child th{border-top:0}.quantity-group small{display:inline;margin-left:7px;color:#687f92;font-size:9px;font-weight:600}
 
+/* v31: 概算数量の区分開閉 */
+.quantity-group th{padding:0}.quantity-group-toggle{width:100%;min-height:38px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border:0;background:#eaf2f8;color:#173b5a;text-align:left;font-size:12px;font-weight:800;cursor:pointer}.quantity-group-toggle:hover{background:#dceaf4}.quantity-group-toggle span{min-width:0}.quantity-group-toggle i{width:22px;height:22px;display:grid;place-items:center;flex:0 0 auto;border:1px solid #b8cad8;border-radius:5px;background:#fff;color:#1768ad;font-size:15px;font-style:normal;line-height:1}.quantity-item.is-collapsed{display:none}
+
 /* v10: 選択足場の断面図 */
 .section-preview{margin:0 0 12px;padding:7px;border:1px solid #d7e3eb;border-radius:9px;background:linear-gradient(#f9fcfe,#edf4f8)}.section-preview svg{display:block;width:100%;height:auto}.section-ground{stroke:#71899b;stroke-width:2}.section-post{stroke:#183a55;stroke-width:4;stroke-linecap:round}.section-floor{stroke:#1684f8;stroke-width:3}.section-brace{stroke:#7b91a2;stroke-width:1.5}.section-jack{fill:#183a55}.section-dimension{stroke:#60788a;stroke-width:1}.section-arrow{fill:#60788a}.section-level{fill:#708393;font-size:8px}.section-width,.section-height{fill:#334e62;font-size:9px;font-weight:700}.section-badge{fill:#0875e8;font-size:10px;font-weight:800}
 
