@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="PDF図面上にIQ足場を配置し、基本部材の概算数量を拾えるツールです。">
   <title>簡易足場拾い｜IQ足場の概算数量</title>
-  <link rel="stylesheet" href="./style.css?v=18">
+  <link rel="stylesheet" href="./style.css?v=19">
 </head>
 <body>
   <header class="topbar">
@@ -54,10 +54,11 @@
         <button class="section-title section-toggle" type="button" aria-expanded="false" aria-controls="levelSectionContent"><b>3</b><h2>レベル設定</h2><span class="section-chevron">＋</span></button>
         <div class="section-content" id="levelSectionContent">
           <div class="level-fields">
-            <div><label>1段目作業床FL（mm）</label><input id="defaultFL" type="number" step="100" value="700"></div>
             <div><label>設置面高さ（mm）</label><input id="defaultBaseHeight" type="number" step="100" value="0"></div>
             <div><label>作業床層数</label><input id="defaultFloorCount" type="number" min="1" step="1" value="1"></div>
           </div>
+          <div class="floor-levels-head"><label>作業床FL設定</label><button type="button" class="mini-add" id="addFloorLevel">＋ FLを追加</button></div>
+          <div id="levelRows" class="level-rows"></div>
           <div class="height-result"><span>足場上部レベル</span><strong id="defaultActualHeight">FL 1,600 mm</strong></div>
         </div>
       </section>
@@ -83,7 +84,7 @@
 
     <section class="drawing-area">
       <div class="toolbar">
-        <div><button class="tool" id="selectMode">↖ 選択</button><button class="tool active" id="placeMode">▭ 足場配置</button><span class="range-help">配置中の右ドラッグ：連続配置／選択中：範囲選択</span></div>
+        <div><button class="tool" id="selectMode">↖ 選択</button><button class="tool active" id="placeMode">▭ 足場配置</button><span class="range-help">左クリック／左ドラッグ：配置・連続配置　右クリック／右ドラッグ：範囲選択</span></div>
         <div class="view-tools"><button class="icon-btn" id="undo" title="元に戻す">↶</button><button class="icon-btn" id="redo" title="やり直す">↷</button><i></i><button class="fit-btn" id="fitView">全体表示</button><button class="zoom-btn" id="zoomOut" title="縮小">−</button><span id="zoomLabel">100%</span><button class="zoom-btn zoom-in" id="zoomIn" title="拡大">＋</button></div>
       </div>
       <div class="canvas-scroll" id="canvasScroll" title="ホイールで拡大縮小・ホイール押し込みドラッグで移動">
@@ -142,6 +143,6 @@
     <nav><a href="./operator.html">運営者情報</a><a href="./privacy.html">プライバシーポリシー</a></nav>
   </footer>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script type="module" src="./app.js?v=24"></script>
+  <script type="module" src="./app.js?v=26"></script>
 </body>
 </html>
