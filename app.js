@@ -12,6 +12,7 @@ let pdfDoc=null,pdfSourceBytes=null,pdfSourceName="",pageNumber=1,pageCount=0,ba
 let jwwDoc=null,jwwRuntimePromise=null,jwwView=null,drawingKind=null;
 let calibrationPoints=[],drag=null,range=null,series=null,resize=null,pan=null,renderTask=null,fitOnNextRender=false,panelCollapsed=true,suppressNextClick=false;
 let wheelTimer=null,pendingWheelZoom=null,wheelAnchor=null,levelApplyTimer=null;
+const quantityCollapsed=new Set(["支柱","根がらみ材","作業床材","手摺","昇降"]);
 
 const stage=$("stage"),layer=$("blocksLayer"),postsLayer=$("postsLayer"),selectionLayer=$("selectionLayer"),calLayer=$("calibrationLayer"),canvas=$("pdfCanvas"),canvasScroll=$("canvasScroll");
 const uid=()=>Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,8);
@@ -59,27 +60,29 @@ function uniquePostPositions(){
   return[...positions.values()];
 }
 
-function uniquePlanEdges(){
+function planEdgeSegments(sourceBlocks=blocks){
   const lines=new Map();
-  blocks.forEach(b=>{
-    const c=corners(b);
-    [[c[0],c[1],"h"],[c[2],c[3],"h"],[c[0],c[2],"v"],[c[1],c[3],"v"]].forEach(([start,end,axis])=>{
+  sourceBlocks.forEach(b=>{
+    const c=corners(b),horizontalKind=Number(b.rotation)===0?"long":"end",verticalKind=Number(b.rotation)===0?"end":"long";
+    [[c[0],c[1],"h",horizontalKind],[c[2],c[3],"h",horizontalKind],[c[0],c[2],"v",verticalKind],[c[1],c[3],"v",verticalKind]].forEach(([start,end,axis,kind])=>{
       const fixed=Math.round((axis==="h"?start[1]:start[0])*1000),a=axis==="h"?start[0]:start[1],z=axis==="h"?end[0]:end[1],lo=Math.min(a,z),hi=Math.max(a,z),key=axis+":"+fixed;
-      if(!lines.has(key))lines.set(key,[]);lines.get(key).push([lo,hi]);
+      if(!lines.has(key))lines.set(key,[]);lines.get(key).push({lo,hi,kind});
     });
   });
   const standard=[1829,1524,1219,914,610,600,475];
   const nearestRail=mm=>standard.find(size=>Math.abs(size-mm)<10)??Math.round(mm);
   const edges=[];
   lines.forEach(segments=>{
-    const points=[...new Set(segments.flatMap(([a,z])=>[a,z]).map(v=>Math.round(v*1000)))].sort((a,z)=>a-z);
+    const points=[...new Set(segments.flatMap(segment=>[segment.lo,segment.hi]).map(v=>Math.round(v*1000)))].sort((a,z)=>a-z);
     for(let i=0;i<points.length-1;i++){
-      const lo=points[i]/1000,hi=points[i+1]/1000,mid=(lo+hi)/2;
-      if(segments.some(([a,z])=>mid>a-0.001&&mid<z+0.001))edges.push({size:nearestRail((hi-lo)*mmPerPx)});
+      const lo=points[i]/1000,hi=points[i+1]/1000,mid=(lo+hi)/2,covering=segments.filter(segment=>mid>segment.lo-0.001&&mid<segment.hi+0.001);
+      if(covering.length)edges.push({size:nearestRail((hi-lo)*mmPerPx),kind:covering[0].kind,coverage:covering.length});
     }
   });
   return edges;
 }
+const uniquePlanEdges=(sourceBlocks=blocks)=>planEdgeSegments(sourceBlocks);
+const exposedEndEdges=(sourceBlocks=blocks)=>planEdgeSegments(sourceBlocks).filter(edge=>edge.kind==="end"&&edge.coverage===1);
 
 function solveColumn(rawHeight){
   const height=Math.round(Math.max(0,Number(rawHeight)||0));
@@ -397,25 +400,38 @@ function updateSummary(){
   const length=blocks.reduce((s,b)=>s+b.span,0)/1000,area=blocks.reduce((s,b)=>s+b.span/1000*scaffoldHeight(b)/1000,0);
   $("metricCount").textContent=blocks.length;$("metricLength").textContent=length.toFixed(1);$("metricArea").textContent=area.toFixed(1);
   const rows=quantities();$("csv").disabled=!rows.length;
-  $("quantityBody").innerHTML=rows.length?rows.map(r=>r[4]==="group"?`<tr class="quantity-group"><th colspan="2">${r[0]}${r[1]?`<small>${r[1]}</small>`:""}</th></tr>`:`<tr><td>${r[0]}<small>${r[1]}</small></td><td><strong>${r[2].toLocaleString()}</strong> ${r[3]}</td></tr>`).join(""):'<tr><td colspan="2" class="zero">足場を配置すると集計します</td></tr>';
+  let currentGroup="";
+  $("quantityBody").innerHTML=rows.length?rows.map(r=>{
+    if(r[4]==="group"){
+      currentGroup=r[0];const collapsed=quantityCollapsed.has(currentGroup);
+      return`<tr class="quantity-group"><th colspan="2"><button type="button" class="quantity-group-toggle" data-quantity-toggle="${currentGroup}" aria-expanded="${!collapsed}"><span>${r[0]}${r[1]?`<small>${r[1]}</small>`:""}</span><i>${collapsed?"＋":"−"}</i></button></th></tr>`;
+    }
+    return`<tr class="quantity-item${quantityCollapsed.has(currentGroup)?" is-collapsed":""}" data-quantity-group="${currentGroup}"><td>${r[0]}<small>${r[1]}</small></td><td><strong>${r[2].toLocaleString()}</strong> ${r[3]}</td></tr>`;
+  }).join(""):'<tr><td colspan="2" class="zero">足場を配置すると集計します</td></tr>';
 }
 function quantities(){
   if(!blocks.length)return[];
   const floorCount=floorCountOf,posts=uniquePostPositions(),postCount=posts.length;
-  const rootTotals=new Map(),workHandrails=new Map(),workBraces=new Map(),deckTotals=new Map();
+  const rootTotals=new Map(),floorRailTotals=new Map(),workHandrails=new Map(),workBraces=new Map(),deckTotals=new Map(),floorLayers=new Map();
   uniquePlanEdges().forEach(edge=>rootTotals.set(edge.size,(rootTotals.get(edge.size)||0)+1));
   blocks.forEach(b=>{
     const count=floorCount(b),handrailSides=(b.outerProtection==="handrail"?1:0)+(b.innerProtection==="handrail"?1:0),braceSides=(b.outerProtection==="brace"?1:0)+(b.innerProtection==="brace"?1:0);
     workHandrails.set(b.span,(workHandrails.get(b.span)||0)+count*2*handrailSides);workBraces.set(b.span,(workBraces.get(b.span)||0)+count*braceSides);
     const boardWidths=b.width<=610?[490]:b.width<=914?[490,240]:[490,490];
     boardWidths.forEach(boardWidth=>{const key=b.span+"×"+boardWidth;deckTotals.set(key,(deckTotals.get(key)||0)+count)});
+    for(let i=0;i<count;i++){const level=Number(b.firstFloorFL)+i*1900;if(!floorLayers.has(level))floorLayers.set(level,[]);floorLayers.get(level).push(b)}
+  });
+  floorLayers.forEach(layerBlocks=>{
+    uniquePlanEdges(layerBlocks).forEach(edge=>floorRailTotals.set(edge.size,(floorRailTotals.get(edge.size)||0)+1));
+    exposedEndEdges(layerBlocks).forEach(edge=>workHandrails.set(edge.size,(workHandrails.get(edge.size)||0)+2));
   });
   const group=(name,detail="")=>[name,detail,0,"","group"],rows=[group("支柱","支柱位置 "+postCount+"箇所"),...verticalBreakdown(posts),group("根がらみ材")];
   [...rootTotals].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"平面外周（接続部重複なし）",count,"本"]));
   rows.push(group("作業床材"));
+  [...floorRailTotals].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"作業床受け（同一床・接続部重複なし）",count,"本"]));
   [...deckTotals].sort((a,b)=>b[0].localeCompare(a[0],"ja",{numeric:true})).forEach(([size,count])=>rows.push(["布板 "+size,"Sウォーク",count,"枚"]));
   rows.push(group("手摺"));
-  [...workHandrails].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"各作業床450/900・手すり設定側",count,"本"]));
+  [...workHandrails].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"各作業床450/900・長手／端部",count,"本"]));
   [...workBraces].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQブレス "+size,"各作業床・ブレス設定側",count,"本"]));
   const stairCount=blocks.reduce((sum,b)=>sum+(b.hasStair&&b.span===1829?Math.max(0,floorCount(b)-1):0),0);
   rows.push(group("昇降"),["階段 1900","IQアルミカイダン19",stairCount,"基"],["階段手すり","IQカイダンレール",stairCount,"本"]);return rows;
@@ -497,6 +513,7 @@ function removeSelected(){
 }
 
 $("pdfInput").addEventListener("change",e=>e.target.files[0]&&loadDrawingFile(e.target.files[0]));
+$("quantityBody").addEventListener("click",e=>{const button=e.target.closest("[data-quantity-toggle]");if(!button)return;const name=button.dataset.quantityToggle;quantityCollapsed.has(name)?quantityCollapsed.delete(name):quantityCollapsed.add(name);updateSummary()});
 document.querySelector(".pdf-drop").addEventListener("dragover",e=>e.preventDefault());
 document.querySelector(".pdf-drop").addEventListener("drop",e=>{e.preventDefault();const f=e.dataTransfer.files[0];if(f&&(/\.(pdf|jww)$/i.test(f.name)||f.type==="application/pdf"))loadDrawingFile(f)});
 $("prevPage").onclick=async()=>{if(pageNumber>1){pageNumber--;fitOnNextRender=true;await renderPdf()}};
