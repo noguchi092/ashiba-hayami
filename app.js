@@ -7,24 +7,29 @@ const POST_SIZES=[3800,2850,1900,1425,950,475],LOWER_POST_SIZES=[2750,1425,950,4
 const BASE_SCALE = 1.25, KEY = "ashiba-hayami-v1";
 const columnPlanCache=new Map();
 let blocks=[],history=[],future=[],selectedId=null,selectedIds=new Set(),tool="add",placementStair=false;
-let span=1829,width=610,defaultFL=700,defaultBaseHeight=0,defaultFloorCount=1,drawingScale=100,mmPerPx=28.222,zoom=1;
+let span=1829,width=610,defaultFL=700,defaultFloorFLs=[700],defaultBaseHeight=0,defaultFloorCount=1,drawingScale=100,mmPerPx=28.222,zoom=1;
 let pdfDoc=null,pdfSourceBytes=null,pdfSourceName="",pageNumber=1,pageCount=0,baseStage={width:1120,height:760};
-let calibrationPoints=[],drag=null,range=null,series=null,pan=null,renderTask=null,fitOnNextRender=false,panelCollapsed=true,suppressNextClick=false;
+let calibrationPoints=[],drag=null,range=null,series=null,resize=null,pan=null,renderTask=null,fitOnNextRender=false,panelCollapsed=true,suppressNextClick=false;
 let wheelTimer=null,pendingWheelZoom=null,wheelAnchor=null,levelApplyTimer=null;
 
 const stage=$("stage"),layer=$("blocksLayer"),postsLayer=$("postsLayer"),selectionLayer=$("selectionLayer"),calLayer=$("calibrationLayer"),canvas=$("pdfCanvas"),canvasScroll=$("canvasScroll");
 const uid=()=>Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,8);
 const status=message=>{$("status").textContent=message;$("ratio").textContent=mmPerPx.toFixed(2)+" mm / px"};
-const firstFloorHeight=b=>Math.max(0,Number(b.firstFloorFL??b.fl??0)-Number(b.baseHeight??0));
-const floorCountOf=b=>Math.max(1,Math.round(Number(b.floorCount)||1));
-const workFloorHeights=b=>Array.from({length:floorCountOf(b)},(_,i)=>firstFloorHeight(b)+i*1900);
+const levelFLsOf=b=>{
+  if(Array.isArray(b.floorFLs)&&b.floorFLs.length)return b.floorFLs.map(Number).filter(Number.isFinite);
+  const first=Number(b.firstFloorFL??b.fl??0),count=Math.max(1,Math.round(Number(b.floorCount)||1));
+  return Array.from({length:count},(_,i)=>first+i*1900);
+};
+const firstFloorHeight=b=>Math.max(0,Number(levelFLsOf(b)[0]??0)-Number(b.baseHeight??0));
+const floorCountOf=b=>Math.max(1,levelFLsOf(b).length);
+const workFloorHeights=b=>levelFLsOf(b).map(level=>Math.max(0,level-Number(b.baseHeight??0)));
 const scaffoldHeight=b=>workFloorHeights(b).at(-1)??0;
 const liftCount=b=>Math.max(0,floorCountOf(b)-1);
 const normalizeBlock=b=>{
-  const baseHeight=Number(b.baseHeight??0),firstFloorFL=Number(b.firstFloorFL??b.fl??(700+baseHeight)),floorCount=floorCountOf(b),fl=firstFloorFL+(floorCount-1)*1900;
-  return{...b,firstFloorFL,floorCount,fl,baseHeight,height:Math.max(0,fl-baseHeight),outerProtection:b.outerProtection??"handrail",innerProtection:b.innerProtection??"handrail",hasStair:Boolean(b.hasStair)&&Number(b.span)===1829&&floorCount>1};
+  const baseHeight=Number(b.baseHeight??0),legacyFirst=Number(b.firstFloorFL??b.fl??(700+baseHeight)),floorFLs=(Array.isArray(b.floorFLs)&&b.floorFLs.length?b.floorFLs:Array.from({length:Math.max(1,Math.round(Number(b.floorCount)||1))},(_,i)=>legacyFirst+i*1900)).map(Number).filter(Number.isFinite),firstFloorFL=floorFLs[0]??legacyFirst,floorCount=floorFLs.length,fl=floorFLs.at(-1)??firstFloorFL;
+  return{...b,firstFloorFL,floorFLs,floorCount,fl,baseHeight,height:Math.max(0,fl-baseHeight),outerProtection:b.outerProtection??"handrail",innerProtection:b.innerProtection??"handrail",hasStair:Boolean(b.hasStair)&&Number(b.span)===1829&&floorCount>1};
 };
-const saveLocal=()=>localStorage.setItem(KEY,JSON.stringify({blocks,mmPerPx,drawingScale,defaultFL,defaultBaseHeight,defaultFloorCount,panelCollapsed,levelSettingsApplyAll:true,workFloorBasisV2:true}));
+const saveLocal=()=>localStorage.setItem(KEY,JSON.stringify({blocks,mmPerPx,drawingScale,defaultFL,defaultFloorFLs,defaultBaseHeight,defaultFloorCount,panelCollapsed,levelSettingsApplyAll:true,workFloorBasisV2:true}));
 const setSectionOpen=(id,open)=>{
   const section=$(id);if(!section)return;
   section.classList.toggle("open",open);const toggle=section.querySelector(".section-toggle"),mark=section.querySelector(".section-chevron");
@@ -59,17 +64,25 @@ function uniquePostPositions(){
 }
 
 function uniquePlanEdges(){
-  const edges=new Map();
+  const lines=new Map();
   blocks.forEach(b=>{
-    const c=corners(b),widthRail=b.width===610?600:b.width===914?900:b.width;
-    const horizontalSize=b.rotation===0?b.span:widthRail,verticalSize=b.rotation===0?widthRail:b.span;
-    [[c[0],c[1],horizontalSize],[c[2],c[3],horizontalSize],[c[0],c[2],verticalSize],[c[1],c[3],verticalSize]].forEach(([start,end,size])=>{
-      const a=[Math.round(start[0]*1000),Math.round(start[1]*1000)],z=[Math.round(end[0]*1000),Math.round(end[1]*1000)];
-      const ordered=a[0]<z[0]||(a[0]===z[0]&&a[1]<=z[1])?[a,z]:[z,a],key=ordered[0].join(",")+"|"+ordered[1].join(",");
-      if(!edges.has(key))edges.set(key,{size});
+    const c=corners(b);
+    [[c[0],c[1],"h"],[c[2],c[3],"h"],[c[0],c[2],"v"],[c[1],c[3],"v"]].forEach(([start,end,axis])=>{
+      const fixed=Math.round((axis==="h"?start[1]:start[0])*1000),a=axis==="h"?start[0]:start[1],z=axis==="h"?end[0]:end[1],lo=Math.min(a,z),hi=Math.max(a,z),key=axis+":"+fixed;
+      if(!lines.has(key))lines.set(key,[]);lines.get(key).push([lo,hi]);
     });
   });
-  return[...edges.values()];
+  const standard=[1829,1524,1219,914,610,600,475];
+  const nearestRail=mm=>standard.find(size=>Math.abs(size-mm)<10)??Math.round(mm);
+  const edges=[];
+  lines.forEach(segments=>{
+    const points=[...new Set(segments.flatMap(([a,z])=>[a,z]).map(v=>Math.round(v*1000)))].sort((a,z)=>a-z);
+    for(let i=0;i<points.length-1;i++){
+      const lo=points[i]/1000,hi=points[i+1]/1000,mid=(lo+hi)/2;
+      if(segments.some(([a,z])=>mid>a-0.001&&mid<z+0.001))edges.push({size:nearestRail((hi-lo)*mmPerPx)});
+    }
+  });
+  return edges;
 }
 
 function solveColumn(rawHeight){
@@ -187,7 +200,9 @@ function renderBlocks(){
     const{w,h}=dimensions(b),selected=selectedIds.has(b.id),el=document.createElement("button");
     el.className="scaffold-block"+(selected?" selected":"")+(selected&&selectedIds.size>1?" multi-selected":"")+(b.hasStair?" has-stair":"");el.dataset.id=b.id;
     Object.assign(el.style,{left:b.x*zoom+"px",top:b.y*zoom+"px",width:w*zoom+"px",height:h*zoom+"px",borderColor:COLORS[b.span],backgroundColor:COLORS[b.span]+"30","--c":COLORS[b.span]});
-    el.innerHTML='<span class="block-size">'+b.span+" × "+b.width+(b.hasStair?' <em>階段</em>':'')+"</span>";
+    el.innerHTML='<span class="block-size">'+b.span+" × "+b.width+(b.hasStair?' <em>階段</em>':'')+"</span><span class=\"resize-handle\" title=\"横方向へ延長\" aria-label=\"横方向へ延長\"></span>";
+    const handle=el.querySelector(".resize-handle");
+    handle.addEventListener("pointerdown",e=>{e.preventDefault();e.stopPropagation();const p=point(e),size=dimensions(b);resize={id:b.id,start:p,current:p,origin:{...b},w:size.w,h:size.h};stage.classList.add("series-placing");stage.setPointerCapture(e.pointerId);renderResizePreview()});
     el.addEventListener("pointerdown",e=>{
       if(e.button!==0)return;e.stopPropagation();if(!selectedIds.has(b.id))selectBlocks([b.id]);setTool("select");
       const p=point(e);history=[...history.slice(-39),structuredClone(blocks)];future=[];
@@ -221,6 +236,16 @@ function renderSeries(){
   }
   status(count+"区画を連続配置します");
 }
+function resizeCount(data){return Math.min(100,Math.max(1,Math.round(Math.abs(data.current.x-data.start.x)/data.w)))}
+function renderResizePreview(){
+  selectionLayer.innerHTML="";if(!resize)return;
+  const count=resizeCount(resize),direction=resize.current.x>=resize.start.x?1:-1;
+  for(let i=1;i<=count;i++){
+    const el=document.createElement("div");el.className="series-preview resize-preview";
+    Object.assign(el.style,{left:(resize.origin.x+direction*i*resize.w)*zoom+"px",top:resize.origin.y*zoom+"px",width:resize.w*zoom+"px",height:resize.h*zoom+"px",borderColor:COLORS[resize.origin.span]});selectionLayer.appendChild(el);
+  }
+  status(count+"区画を右下ハンドルから延長します");
+}
 function selectBlocks(ids){
   selectedIds=new Set(ids.filter(id=>blocks.some(b=>b.id===id)));selectedId=[...selectedIds].at(-1)??null;renderBlocks();updateSelectionEditor();
 }
@@ -232,18 +257,18 @@ function renderSelectionSection(selected){
   const items=sourceItems.sort((a,b)=>(sectionAxis==="x"?a.x:a.y)-(sectionAxis==="x"?b.x:b.y));
   const preview=$("selectionSectionView"),totalSpan=items.reduce((sum,b)=>sum+sectionLength(b),0);
   const floorLevels=[...new Set(items.flatMap(block=>workFloorHeights(block).map(height=>Number(block.baseHeight||0)+height)))].sort((a,b)=>a-b);
-  const minBase=Math.min(...items.map(block=>Number(block.baseHeight||0))),upperLevels=items.map(block=>Number(block.fl)+900),maxUpper=Math.max(...upperLevels,minBase+1);
-  const bottom=138,top=20,left=92,right=252,usable=bottom-top,yAtFL=level=>bottom-((level-minBase)/(maxUpper-minBase))*usable;let cursor=left;
+  const minBase=Math.min(...items.map(block=>Number(block.baseHeight||0))),chartMin=Math.min(0,minBase),upperLevels=items.map(block=>Number(block.fl)+900),maxUpper=Math.max(...upperLevels,chartMin+1);
+  const bottom=138,top=20,left=92,right=252,usable=bottom-top,yAtFL=level=>bottom-((level-chartMin)/(maxUpper-chartMin))*usable;let cursor=left;
   const bays=items.map((block,index)=>{
     const bayLength=sectionLength(block),x1=cursor,x2=index===items.length-1?right:cursor+(right-left)*bayLength/totalSpan;cursor=x2;
     const base=Number(block.baseHeight||0),blockFloorLevels=workFloorHeights(block).map(height=>base+height);
     const floors=blockFloorLevels.map((level,floorIndex)=>{const y=yAtFL(level),r450=yAtFL(level+450),r900=yAtFL(level+900),lower=floorIndex>0?blockFloorLevels[floorIndex-1]:null;return`<line class="section-floor" x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"/><line class="section-handrail" x1="${x1}" y1="${r450}" x2="${x2}" y2="${r450}"/><line class="section-handrail" x1="${x1}" y1="${r900}" x2="${x2}" y2="${r900}"/>${block.hasStair&&lower!==null?`<line class="section-stair" x1="${x1+3}" y1="${yAtFL(lower)}" x2="${x2-3}" y2="${y}"/>`:""}`}).join("");
-    return`<line class="section-post" x1="${x1}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x1}" y2="${yAtFL(base)}"/>${index===items.length-1?`<line class="section-post" x1="${x2}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x2}" y2="${yAtFL(base)}"/>`:""}${floors}<text class="section-bay-label" x="${(x1+x2)/2}" y="151" text-anchor="middle">${bayLength}</text>`;
+    return`<line class="section-post" x1="${x1}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x1}" y2="${yAtFL(base)}"/>${index===items.length-1?`<line class="section-post" x1="${x2}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x2}" y2="${yAtFL(base)}"/>`:""}${floors}<circle class="section-post-mark" cx="${x1}" cy="${yAtFL(base)}" r="2.3"/>${index===items.length-1?`<circle class="section-post-mark" cx="${x2}" cy="${yAtFL(base)}" r="2.3"/>`:""}<text class="section-bay-label" x="${(x1+x2)/2}" y="151" text-anchor="middle">${bayLength}</text>`;
   }).join("");
   const floorDimensions=floorLevels.map(level=>{const y=yAtFL(level);return`<line class="section-extension" x1="72" y1="${y}" x2="${left-3}" y2="${y}"/><line class="section-level-tick" x1="69" y1="${y}" x2="75" y2="${y}"/><text class="section-level-label" x="66" y="${y+3}" text-anchor="end">作業床 FL ${level.toLocaleString()}</text>`}).join("");
-  const topLevel=Math.max(...upperLevels),topY=yAtFL(topLevel),baseY=yAtFL(minBase);
+  const topLevel=Math.max(...upperLevels),topY=yAtFL(topLevel),baseY=yAtFL(minBase),zeroY=yAtFL(0);
   const topLabelY=Math.max(16,topY+2);
-  const svg=`<svg viewBox="0 0 340 178" role="img" aria-label="長手方向 ${items.length}区画、合計${totalSpan}ミリ。作業床レベルと足場上部レベルの寸法入り"><defs><marker id="sectionArrow" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 Z" class="section-arrow"/></marker></defs><line class="section-ground" x1="${left-10}" y1="${baseY+3}" x2="${right+10}" y2="${baseY+3}"/>${floorDimensions}${bays}<line class="section-dimension" x1="278" y1="${baseY}" x2="278" y2="${topY}" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${right+3}" y1="${topY}" x2="282" y2="${topY}"/><line class="section-extension" x1="${right+3}" y1="${baseY}" x2="282" y2="${baseY}"/><text class="section-height" x="288" y="${topLabelY}"><tspan x="288">上部 FL</tspan><tspan x="288" dy="9">${topLevel.toLocaleString()} mm</tspan></text><line class="section-dimension" x1="${left}" y1="160" x2="${right}" y2="160" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${left}" y1="${baseY+3}" x2="${left}" y2="164"/><line class="section-extension" x1="${right}" y1="${baseY+3}" x2="${right}" y2="164"/><text class="section-width" x="${(left+right)/2}" y="174" text-anchor="middle">合計 ${totalSpan.toLocaleString()} mm</text><text class="section-badge" x="${left}" y="11">${items.length}区画・作業床最大${Math.max(...items.map(floorCountOf))}層</text></svg>`;
+  const svg=`<svg viewBox="0 0 340 178" role="img" aria-label="長手方向 ${items.length}区画、合計${totalSpan}ミリ。作業床レベル、支柱割付、足場上部レベルの寸法入り"><defs><marker id="sectionArrow" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 Z" class="section-arrow"/></marker></defs><line class="section-ground" x1="${left-10}" y1="${baseY+3}" x2="${right+10}" y2="${baseY+3}"/><text class="section-surface-label" x="${left-12}" y="${baseY+13}" text-anchor="end">設置面</text>${chartMin<=0&&zeroY>=top&&zeroY<=bottom?`<line class="section-fl-zero" x1="72" y1="${zeroY}" x2="${right+10}" y2="${zeroY}"/><text class="section-fl-zero-label" x="66" y="${zeroY+3}" text-anchor="end">FL 0</text>`:""}${floorDimensions}${bays}<text class="section-post-label" x="${left}" y="${top-3}">支柱割付（${items.length+1}本）</text><line class="section-dimension" x1="278" y1="${baseY}" x2="278" y2="${topY}" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${right+3}" y1="${topY}" x2="282" y2="${topY}"/><line class="section-extension" x1="${right+3}" y1="${baseY}" x2="282" y2="${baseY}"/><text class="section-height" x="288" y="${topLabelY}"><tspan x="288">上部 FL</tspan><tspan x="288" dy="9">${topLevel.toLocaleString()} mm</tspan></text><line class="section-dimension" x1="${left}" y1="160" x2="${right}" y2="160" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${left}" y1="${baseY+3}" x2="${left}" y2="164"/><line class="section-extension" x1="${right}" y1="${baseY+3}" x2="${right}" y2="164"/><text class="section-width" x="${(left+right)/2}" y="174" text-anchor="middle">合計 ${totalSpan.toLocaleString()} mm</text><text class="section-badge" x="${left}" y="11">${items.length}区画・作業床最大${Math.max(...items.map(floorCountOf))}層</text></svg>`;
   preview.innerHTML=svg;$("sectionModalView").innerHTML=svg;
 }
 function updateSelectionEditor(){
@@ -265,7 +290,16 @@ function updateSelectionEditor(){
 }
 function applyElevationChange(key,value){
   if(!selectedIds.size||value==="")return;const number=Number(value);
-  commit(blocks.map(b=>{if(!selectedIds.has(b.id))return b;const changed={...b,[key]:number};return{...changed,height:scaffoldHeight(changed)}}));updateSelectionEditor();
+  commit(blocks.map(b=>{
+    if(!selectedIds.has(b.id))return b;
+    const changed={...b,[key]:number};
+    if(key==="firstFloorFL"){
+      const old=Number(levelFLsOf(b)[0]??b.firstFloorFL??0),delta=number-old;changed.floorFLs=levelFLsOf(b).map(level=>level+delta);
+    }else if(key==="floorCount"){
+      const levels=levelFLsOf(b);while(levels.length<number)levels.push((levels.at(-1)??number)+1900);changed.floorFLs=levels.slice(0,number);changed.firstFloorFL=changed.floorFLs[0];
+    }
+    return{...changed,height:scaffoldHeight(changed)};
+  }));updateSelectionEditor();
 }
 function updateSummary(){
   const length=blocks.reduce((s,b)=>s+b.span,0)/1000,area=blocks.reduce((s,b)=>s+b.span/1000*scaffoldHeight(b)/1000,0);
@@ -294,14 +328,24 @@ function quantities(){
   const stairCount=blocks.reduce((sum,b)=>sum+(b.hasStair&&b.span===1829?Math.max(0,floorCount(b)-1):0),0);
   rows.push(group("昇降"),["階段 1900","IQアルミカイダン19",stairCount,"基"],["階段手すり","IQカイダンレール",stairCount,"本"]);return rows;
 }
+function renderLevelRows(){
+  const wrap=$("levelRows");if(!wrap)return;
+  defaultFloorFLs=defaultFloorFLs.length?defaultFloorFLs:[700];defaultFloorCount=defaultFloorFLs.length;$("defaultFloorCount").value=defaultFloorCount;
+  wrap.innerHTML=defaultFloorFLs.map((level,index)=>`<div class="level-row"><label>${index+1}FL（mm）</label><input type="number" min="0" step="100" data-level-index="${index}" value="${Number(level)||0}">${index?`<button type="button" class="mini-remove" data-remove-level="${index}" aria-label="${index+1}FLを削除">×</button>`:""}</div>`).join("");
+  wrap.querySelectorAll("[data-level-index]").forEach(input=>input.addEventListener("input",()=>{defaultFloorFLs=[...wrap.querySelectorAll("[data-level-index]")].map(el=>Number(el.value)||0);defaultFL=defaultFloorFLs[0];handleDefaultLevelInput()}));
+  wrap.querySelectorAll("[data-remove-level]").forEach(button=>button.addEventListener("click",()=>{defaultFloorFLs.splice(Number(button.dataset.removeLevel),1);renderLevelRows();handleDefaultLevelInput()}));
+}
+function addFloorLevel(){
+  const last=defaultFloorFLs.at(-1)??700;defaultFloorFLs.push(last+1900);renderLevelRows();handleDefaultLevelInput();
+}
 function updateDefaultHeightPreview(){
-  defaultFL=Number($("defaultFL").value||0);defaultBaseHeight=Number($("defaultBaseHeight").value||0);defaultFloorCount=Math.max(1,Math.round(Number($("defaultFloorCount").value)||1));
-  $("defaultFloorCount").value=defaultFloorCount;const first=Math.max(0,defaultFL-defaultBaseHeight),upperLevel=defaultFL+(defaultFloorCount-1)*1900+900;
+  defaultFL=Number(defaultFloorFLs[0]??700);defaultBaseHeight=Number($("defaultBaseHeight").value||0);defaultFloorCount=Math.max(1,defaultFloorFLs.length);
+  $("defaultFloorCount").value=defaultFloorCount;const first=Math.max(0,defaultFL-defaultBaseHeight),upperLevel=(defaultFloorFLs.at(-1)??defaultFL)+900;
   $("defaultActualHeight").textContent="FL "+upperLevel.toLocaleString()+" mm";$("addMode").disabled=first<=0;saveLocal();
 }
 function applyDefaultLevelToAll(){
   const first=defaultFL-defaultBaseHeight;if(!blocks.length||first<=0)return;
-  commit(blocks.map(b=>({...b,firstFloorFL:defaultFL,floorCount:defaultFloorCount,baseHeight:defaultBaseHeight})));updateSelectionEditor();status(blocks.length+"件すべてに作業床設定を反映しました");
+  commit(blocks.map(b=>({...b,firstFloorFL:defaultFL,floorFLs:[...defaultFloorFLs],floorCount:defaultFloorCount,baseHeight:defaultBaseHeight})));updateSelectionEditor();status(blocks.length+"件すべてに作業床設定を反映しました");
 }
 function handleDefaultLevelInput(){
   updateDefaultHeightPreview();clearTimeout(levelApplyTimer);levelApplyTimer=setTimeout(applyDefaultLevelToAll,250);
@@ -322,17 +366,18 @@ function applyProjectData(data){
   history=[...history,structuredClone(blocks)];blocks=data.blocks.map(normalizeBlock);
   if(Number.isFinite(data.mmPerPx))mmPerPx=data.mmPerPx;
   if(Number.isFinite(data.drawingScale)){drawingScale=data.drawingScale;$("drawingScale").value=drawingScale}
-  if(Number.isFinite(data.defaultFL)){defaultFL=data.defaultFL;$("defaultFL").value=defaultFL}
+  if(Array.isArray(data.defaultFloorFLs)&&data.defaultFloorFLs.length)defaultFloorFLs=data.defaultFloorFLs.map(Number).filter(Number.isFinite);
+  else if(Number.isFinite(data.defaultFL))defaultFloorFLs=[data.defaultFL];
   if(Number.isFinite(data.defaultBaseHeight)){defaultBaseHeight=data.defaultBaseHeight;$("defaultBaseHeight").value=defaultBaseHeight}
-  if(Number.isFinite(data.defaultFloorCount)){defaultFloorCount=Math.max(1,Math.round(data.defaultFloorCount));$("defaultFloorCount").value=defaultFloorCount}
+  if(Number.isFinite(data.defaultFloorCount)&&!Array.isArray(data.defaultFloorFLs)){defaultFloorCount=Math.max(1,Math.round(data.defaultFloorCount));defaultFloorFLs=Array.from({length:defaultFloorCount},(_,i)=>(defaultFloorFLs[0]??700)+i*1900)}
   if(typeof data.panelCollapsed==="boolean")panelCollapsed=data.panelCollapsed;
-  selectBlocks([]);applyPanelState();updateDefaultHeightPreview();saveLocal();renderBlocks();updateSummary();
+  selectBlocks([]);applyPanelState();renderLevelRows();updateDefaultHeightPreview();saveLocal();renderBlocks();updateSummary();
 }
 async function saveProjectZip(){
   try{
     if(!window.JSZip)throw new Error("ZIP機能を読み込めませんでした");status("PDFと配置データをZIPへ保存しています…");
     const zip=new window.JSZip(),safePdfName=(pdfSourceName||"drawing.pdf").replace(/[\\/:*?"<>|]/g,"_"),pdfPath=pdfSourceBytes?"drawing/"+safePdfName:null;
-    const data={version:4,blocks,mmPerPx,drawingScale,defaultFL,defaultBaseHeight,defaultFloorCount,panelCollapsed,pageNumber,savedAt:new Date().toISOString(),pdf:pdfPath?{name:pdfSourceName,path:pdfPath,pageNumber}:null};
+    const data={version:5,blocks,mmPerPx,drawingScale,defaultFL,defaultFloorFLs,defaultBaseHeight,defaultFloorCount,panelCollapsed,pageNumber,savedAt:new Date().toISOString(),pdf:pdfPath?{name:pdfSourceName,path:pdfPath,pageNumber}:null};
     zip.file("project.json",JSON.stringify(data,null,2));if(pdfPath)zip.file(pdfPath,pdfSourceBytes,{binary:true,compression:"STORE"});
     const blob=await zip.generateAsync({type:"blob",compression:"DEFLATE",compressionOptions:{level:6}});downloadBlob("足場拾いプロジェクト.zip",blob);
     status(pdfPath?"PDFを含むプロジェクトZIPを保存しました":"配置データをプロジェクトZIPへ保存しました（PDF未読込）");
@@ -369,7 +414,7 @@ $("calibrate").onclick=()=>{calibrationPoints=[];setTool("calibrate");renderCali
 document.querySelectorAll("[data-span]").forEach(el=>el.onclick=()=>{document.querySelectorAll("[data-span]").forEach(v=>v.classList.remove("active"));el.classList.add("active");span=Number(el.dataset.span);setTool("add")});
 $("scaffoldWidth").onchange=e=>width=Number(e.target.value);
 $("placeStair").onchange=e=>{placementStair=e.target.checked;if(placementStair){const target=document.querySelector('[data-span="1829"]');target?.click();$("addMode").textContent="＋ 階段付き足場を配置"}else $("addMode").textContent="＋ 図面をクリックして配置"};
-$("defaultFL").oninput=handleDefaultLevelInput;$("defaultBaseHeight").oninput=handleDefaultLevelInput;$("defaultFloorCount").oninput=handleDefaultLevelInput;
+$("defaultBaseHeight").oninput=handleDefaultLevelInput;$("defaultFloorCount").oninput=()=>{const count=Math.max(1,Math.round(Number($("defaultFloorCount").value)||1));while(defaultFloorFLs.length<count)defaultFloorFLs.push((defaultFloorFLs.at(-1)??700)+1900);defaultFloorFLs=defaultFloorFLs.slice(0,count);renderLevelRows();handleDefaultLevelInput()};$("addFloorLevel").onclick=addFloorLevel;
 $("addMode").onclick=$("placeMode").onclick=()=>setTool("add");$("selectMode").onclick=()=>setTool("select");$("fitView").onclick=fitToView;
 $("summaryToggle").onclick=()=>{panelCollapsed=!panelCollapsed;applyPanelState();saveLocal()};
 document.querySelectorAll(".section-toggle").forEach(toggle=>toggle.addEventListener("click",()=>setSectionOpen(toggle.closest(".setup-section").id,toggle.getAttribute("aria-expanded")!=="true")));
@@ -391,11 +436,11 @@ canvasScroll.addEventListener("pointerup",stopPan);canvasScroll.addEventListener
 
 stage.addEventListener("contextmenu",e=>e.preventDefault());
 stage.addEventListener("pointerdown",e=>{
-  if(e.button===2&&tool==="add"){
+  if(e.button===0&&!e.shiftKey&&tool==="add"){
     e.preventDefault();const p=point(e),firstHeight=defaultFL-defaultBaseHeight;
     if(firstHeight<=0){status("1段目作業床FLは設置面高さより大きくしてください");return}
     if(placementStair&&(span!==1829||defaultFloorCount<2)){status("階段は1829スパン・作業床2層以上で配置してください");return}
-    series={start:p,current:p,w:span/mmPerPx,d:width/mmPerPx,span,width,firstFloorFL:defaultFL,floorCount:defaultFloorCount,baseHeight:defaultBaseHeight,hasStair:placementStair};
+    series={start:p,current:p,w:span/mmPerPx,d:width/mmPerPx,span,width,firstFloorFL:defaultFL,floorFLs:[...defaultFloorFLs],floorCount:defaultFloorCount,baseHeight:defaultBaseHeight,hasStair:placementStair};
     stage.classList.add("series-placing");stage.setPointerCapture(e.pointerId);renderSeries();return;
   }
   if(e.button!==2&&!(e.button===0&&e.shiftKey))return;e.preventDefault();setTool("select");const p=point(e);range={start:p,current:p};
@@ -414,11 +459,11 @@ stage.addEventListener("click",e=>{
   if(tool!=="add"){selectBlock(null);return}
   const firstHeight=defaultFL-defaultBaseHeight;if(firstHeight<=0){status("1段目作業床FLは設置面高さより大きくしてください");return}
   if(placementStair&&(span!==1829||defaultFloorCount<2)){status("階段は1829スパン・作業床2層以上で配置してください");return}
-  const w=span/mmPerPx,d=width/mmPerPx,raw={id:uid(),x:Math.max(0,p.x-w/2),y:Math.max(0,p.y-d/2),span,width,firstFloorFL:defaultFL,floorCount:defaultFloorCount,baseHeight:defaultBaseHeight,rotation:0,outerProtection:"handrail",innerProtection:"handrail",hasStair:placementStair};
+  const w=span/mmPerPx,d=width/mmPerPx,raw={id:uid(),x:Math.max(0,p.x-w/2),y:Math.max(0,p.y-d/2),span,width,firstFloorFL:defaultFL,floorFLs:[...defaultFloorFLs],floorCount:defaultFloorCount,baseHeight:defaultBaseHeight,rotation:0,outerProtection:"handrail",innerProtection:"handrail",hasStair:placementStair};
   const result=snapBlock(raw),b=result.block;commit([...blocks,b]);selectBlock(b.id);status(result.snapped?"支柱位置に吸着して配置しました":span+"mmスパンを配置しました");
 });
 stage.addEventListener("pointermove",e=>{
-  const p=point(e);if(series){series.current=p;renderSeries();return}if(range){range.current=p;renderRange();return}if(!drag)return;
+  const p=point(e);if(series){series.current=p;renderSeries();return}if(resize){resize.current=p;renderResizePreview();return}if(range){range.current=p;renderRange();return}if(!drag)return;
   const dx=p.x-drag.start.x,dy=p.y-drag.start.y;
   if(drag.ids.length===1){
     const id=drag.ids[0],moving=blocks.find(b=>b.id===id),origin=drag.origins.get(id);if(!moving||!origin)return;
@@ -432,14 +477,23 @@ stage.addEventListener("pointermove",e=>{
 stage.addEventListener("pointerup",e=>{
   if(series){
     series.current=point(e);const count=seriesCount(series),direction=series.current.x>=series.start.x?1:-1;
-    const raw={id:uid(),x:Math.max(0,series.start.x-series.w/2),y:Math.max(0,series.start.y-series.d/2),span:series.span,width:series.width,firstFloorFL:series.firstFloorFL,floorCount:series.floorCount,baseHeight:series.baseHeight,rotation:0,outerProtection:"handrail",innerProtection:"handrail",hasStair:series.hasStair};
+    const raw={id:uid(),x:Math.max(0,series.start.x-series.w/2),y:Math.max(0,series.start.y-series.d/2),span:series.span,width:series.width,firstFloorFL:series.firstFloorFL,floorFLs:[...series.floorFLs],floorCount:series.floorCount,baseHeight:series.baseHeight,rotation:0,outerProtection:"handrail",innerProtection:"handrail",hasStair:series.hasStair};
     const first=snapBlock(raw).block,created=[];
     for(let i=0;i<count;i++){
       const candidate={...first,id:i===0?first.id:uid(),x:Math.max(0,first.x+i*direction*series.w)};
       if([...blocks,...created].some(other=>overlapArea(candidate,other)>1))continue;created.push(candidate);
     }
-    series=null;stage.classList.remove("series-placing");selectionLayer.innerHTML="";
+    series=null;suppressNextClick=true;stage.classList.remove("series-placing");selectionLayer.innerHTML="";
     if(created.length){commit([...blocks,...created]);selectBlocks(created.map(b=>b.id));status(created.length+"区画を横方向へ連続配置しました")}else status("重なる位置には配置できません");
+  }
+  if(resize){
+    resize.current=point(e);const count=resizeCount(resize),direction=resize.current.x>=resize.start.x?1:-1,created=[];
+    for(let i=1;i<=count;i++){
+      const candidate={...resize.origin,id:uid(),x:Math.max(0,resize.origin.x+direction*i*resize.w)};
+      if([...blocks,...created].some(other=>overlapArea(candidate,other)>1))continue;created.push(candidate);
+    }
+    const sourceId=resize.id;resize=null;stage.classList.remove("series-placing");selectionLayer.innerHTML="";
+    if(created.length){commit([...blocks,...created]);selectBlocks([sourceId,...created.map(b=>b.id)]);status(created.length+"区画を右下ハンドルから延長しました")}else status("重なる位置には延長できません");
   }
   if(range){
     range.current=point(e);const r=rectangle(range.start,range.current);
@@ -448,7 +502,7 @@ stage.addEventListener("pointerup",e=>{
   }
   if(drag){drag=null;saveLocal();updateSelectionEditor()}
 });
-stage.addEventListener("pointercancel",()=>{drag=null;range=null;series=null;stage.classList.remove("range-selecting","series-placing");selectionLayer.innerHTML=""});
+stage.addEventListener("pointercancel",()=>{drag=null;range=null;series=null;resize=null;stage.classList.remove("range-selecting","series-placing");selectionLayer.innerHTML=""});
 
 $("zoomOut").onclick=()=>applyZoom(zoom-.15);$("zoomIn").onclick=()=>applyZoom(zoom+.15);
 $("undo").onclick=()=>{const prev=history.at(-1);if(!prev)return;future=[structuredClone(blocks),...future];blocks=prev.map(normalizeBlock);history=history.slice(0,-1);selectBlocks([]);saveLocal();renderBlocks();updateSummary()};
@@ -482,10 +536,11 @@ try{
   const data=JSON.parse(localStorage.getItem(KEY)||"{}");
   if(Array.isArray(data.blocks))blocks=data.blocks.map(normalizeBlock);if(data.mmPerPx)mmPerPx=data.mmPerPx;
   if(data.drawingScale){drawingScale=data.drawingScale;$("drawingScale").value=drawingScale}
-  if(data.workFloorBasisV2===true&&Number.isFinite(data.defaultFL)){defaultFL=data.defaultFL;$("defaultFL").value=defaultFL}else{$("defaultFL").value=defaultFL}
+  if(Array.isArray(data.defaultFloorFLs)&&data.defaultFloorFLs.length)defaultFloorFLs=data.defaultFloorFLs.map(Number).filter(Number.isFinite);
+  else if(Number.isFinite(data.defaultFL))defaultFloorFLs=[data.defaultFL];
   if(Number.isFinite(data.defaultBaseHeight)){defaultBaseHeight=data.defaultBaseHeight;$("defaultBaseHeight").value=defaultBaseHeight}
-  if(data.workFloorBasisV2===true&&Number.isFinite(data.defaultFloorCount)){defaultFloorCount=Math.max(1,Math.round(data.defaultFloorCount));$("defaultFloorCount").value=defaultFloorCount}
+  if(data.workFloorBasisV2===true&&Number.isFinite(data.defaultFloorCount)&&!Array.isArray(data.defaultFloorFLs)){defaultFloorCount=Math.max(1,Math.round(data.defaultFloorCount));defaultFloorFLs=Array.from({length:defaultFloorCount},(_,i)=>(defaultFloorFLs[0]??700)+i*1900)}
   if(data.workFloorBasisV2!==true)blocks=blocks.map(b=>normalizeBlock({...b,firstFloorFL:Number(b.baseHeight||0)+700,floorCount:1}));
   if(typeof data.panelCollapsed==="boolean")panelCollapsed=data.panelCollapsed;if(blocks.length)status("前回の配置データを復元しました");
 }catch{localStorage.removeItem(KEY)}
-updateDefaultHeightPreview();applyPanelState();setStageSize();renderBlocks();updateSummary();updateSelectionEditor();status($("status").textContent);
+renderLevelRows();updateDefaultHeightPreview();applyPanelState();setStageSize();renderBlocks();updateSummary();updateSelectionEditor();status($("status").textContent);
