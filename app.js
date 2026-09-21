@@ -83,6 +83,9 @@ function uniquePlanEdges(){
 function solveColumn(rawHeight){
   const height=Math.round(Math.max(0,Number(rawHeight)||0));
   if(columnPlanCache.has(height))return columnPlanCache.get(height);
+  if(Math.abs(height-700)<=25){
+    const standard700={lower:238,regular:[475],jack:325,pieces:2,standard:0};columnPlanCache.set(height,standard700);return standard700;
+  }
   const maxRegular=Math.max(0,height-Math.min(...LOWER_POST_SIZES)-45),plans=new Map([[0,[]]]);
   for(let sum=0;sum<=maxRegular;sum++){
     const plan=plans.get(sum);if(!plan)continue;
@@ -247,15 +250,11 @@ function selectBlocks(ids){
 function selectBlock(id){selectBlocks(id?[id]:[])}
 function sectionPostAllocation(block){
   const first=Math.round(firstFloorHeight(block)),parts=[];
-  if(Math.abs(first-700)<=25){
-    parts.push({label:"下部支柱 238",weight:238},{label:"支柱 475",weight:475});
-  }else{
-    const plan=solveColumn(first);
-    if(plan){
-      parts.push({label:"下部支柱 "+plan.lower,weight:plan.lower});
-      plan.regular.forEach(size=>parts.push({label:"支柱 "+size,weight:size}));
-    }else parts.push({label:"下部構成 要確認",weight:Math.max(first,1)});
-  }
+  const plan=solveColumn(first);
+  if(plan){
+    parts.push({label:"下部支柱 "+plan.lower,weight:plan.lower});
+    plan.regular.forEach(size=>parts.push({label:"支柱 "+size,weight:size}));
+  }else parts.push({label:"下部構成 要確認",weight:Math.max(first,1)});
   for(let i=1;i<floorCountOf(block);i++)parts.push({label:"支柱 1900",weight:1900});
   parts.push({label:"支柱 950",weight:950});
   return parts;
