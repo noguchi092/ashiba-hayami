@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="PDF図面上にIQ足場を配置し、基本部材の概算数量を拾えるツールです。">
   <title>簡易足場拾い｜IQ足場の概算数量</title>
-  <link rel="stylesheet" href="./style.css?v=19">
+  <link rel="stylesheet" href="./style.css?v=20">
 </head>
 <body>
   <header class="topbar">
@@ -54,10 +54,11 @@
         <button class="section-title section-toggle" type="button" aria-expanded="false" aria-controls="levelSectionContent"><b>3</b><h2>レベル設定</h2><span class="section-chevron">＋</span></button>
         <div class="section-content" id="levelSectionContent">
           <div class="level-fields">
+            <div><label>1段目作業床高さ（mm）</label><input id="defaultFL" type="number" step="100" value="700"></div>
             <div><label>設置面高さ（mm）</label><input id="defaultBaseHeight" type="number" step="100" value="0"></div>
             <div><label>作業床層数</label><input id="defaultFloorCount" type="number" min="1" step="1" value="1"></div>
           </div>
-          <div class="floor-levels-head"><label>作業床FL設定</label><button type="button" class="mini-add" id="addFloorLevel">＋ FLを追加</button></div>
+          <div class="floor-levels-head"><label>建物FL設定（基準線）</label><button type="button" class="mini-add" id="addFloorLevel">＋ FLを追加</button></div>
           <div id="levelRows" class="level-rows"></div>
           <div class="height-result"><span>足場上部レベル</span><strong id="defaultActualHeight">FL 1,600 mm</strong></div>
         </div>
@@ -110,7 +111,7 @@
           <div class="section-preview" id="selectionSectionView" role="button" tabindex="0" aria-label="選択した足場の長手方向立面図。クリックで拡大"></div>
           <div class="selected-spec"><i id="selectedColor"></i><strong id="selectedSpec"></strong><small>mm</small></div>
           <div class="two-fields">
-            <div><label>1段目作業床FL（mm）</label><input id="selectedFL" type="number" step="100"></div>
+            <div><label>1段目作業床高さ（mm）</label><input id="selectedFL" type="number" step="100"></div>
             <div><label>設置面高さ（mm）</label><input id="selectedBaseHeight" type="number" step="100"></div>
           </div>
           <div class="selected-floor-count"><label>作業床層数</label><input id="selectedFloorCount" type="number" min="1" step="1"></div>
@@ -135,7 +136,7 @@
     <div class="section-modal-card">
       <div class="section-modal-head"><h2 id="sectionModalTitle">足場断面図（長手方向）</h2><button id="closeSectionModal" type="button" aria-label="拡大断面図を閉じる">×</button></div>
       <div class="section-modal-view" id="sectionModalView"></div>
-      <p>作業床レベルは左側、足場上部レベルは右側に表示しています。</p>
+      <p>作業床高さは左側、建物FLと足場上部レベルは右側に表示しています。</p>
     </div>
   </dialog>
   <footer class="page-footer">
@@ -143,6 +144,6 @@
     <nav><a href="./operator.html">運営者情報</a><a href="./privacy.html">プライバシーポリシー</a></nav>
   </footer>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-  <script type="module" src="./app.js?v=26"></script>
+  <script type="module" src="./app.js?v=27"></script>
 </body>
 </html>
