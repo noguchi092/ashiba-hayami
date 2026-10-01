@@ -7,6 +7,7 @@ const POST_SIZES=[3800,2850,1900,1425,950,475],LOWER_POST_SIZES=[2750,1425,950,4
 const RAIL_SIZES=[1829,1524,1219,1107,914,722,610,360,305,250],DECK_LENGTHS=[1829,1524,1219,914,610],DECK_WIDTHS=[490,240];
 const BASE_SCALE = 1.25, KEY = "ashiba-hayami-v1";
 const columnPlanCache=new Map();
+let defaultRails={outerProtection:"handrail",innerProtection:"handrail",endProtection:"handrail"},columnDraft=[],columnReference=null;
 let blocks=[],history=[],future=[],selectedId=null,selectedIds=new Set(),tool="add",placementStair=false;
 let span=1829,width=610,defaultFL=700,buildingFLs=[0],defaultBaseHeight=0,defaultFloorCount=1,drawingScale=100,mmPerPx=28.222,zoom=1;
 let pdfDoc=null,pdfSourceBytes=null,pdfSourceName="",pageNumber=1,pageCount=0,baseStage={width:1120,height:760};
@@ -25,9 +26,9 @@ const scaffoldHeight=b=>workFloorHeights(b).at(-1)??0;
 const liftCount=b=>Math.max(0,floorCountOf(b)-1);
 const normalizeBlock=b=>{
   const baseHeight=Number(b.baseHeight??0),legacyLevels=Array.isArray(b.floorFLs)?b.floorFLs.map(Number).filter(Number.isFinite):[],firstFloorFL=Number(b.firstFloorFL??legacyLevels[0]??b.fl??(700+baseHeight)),floorCount=Math.max(1,Math.round(Number(b.floorCount)||legacyLevels.length||1)),fl=firstFloorFL+(floorCount-1)*1900;
-  return{...b,firstFloorFL,floorCount,fl,baseHeight,height:Math.max(0,fl-baseHeight),outerProtection:b.outerProtection??"handrail",innerProtection:b.innerProtection??"handrail",hasStair:Boolean(b.hasStair)&&Number(b.span)===1829&&floorCount>1};
+  return{...b,firstFloorFL,floorCount,fl,baseHeight,height:Math.max(0,fl-baseHeight),outerProtection:b.outerProtection??"handrail",innerProtection:b.innerProtection??"handrail",endProtection:b.endProtection??"handrail",hasStair:Boolean(b.hasStair)&&Number(b.span)===1829&&floorCount>1};
 };
-const saveLocal=()=>localStorage.setItem(KEY,JSON.stringify({blocks,mmPerPx,drawingScale,defaultFL,buildingFLs,defaultBaseHeight,defaultFloorCount,panelCollapsed,levelSettingsApplyAll:true,workFloorBasisV2:true,separateBuildingFLs:true}));
+const saveLocal=()=>localStorage.setItem(KEY,JSON.stringify({defaultRails,blocks,mmPerPx,drawingScale,defaultFL,buildingFLs,defaultBaseHeight,defaultFloorCount,panelCollapsed,levelSettingsApplyAll:true,workFloorBasisV2:true,separateBuildingFLs:true}));
 const setSectionOpen=(id,open)=>{
   const section=$(id);if(!section)return;
   section.classList.toggle("open",open);const toggle=section.querySelector(".section-toggle"),mark=section.querySelector(".section-chevron");
@@ -50,13 +51,13 @@ const selectedBlocks=()=>blocks.filter(b=>selectedIds.has(b.id));
 
 function uniquePostPositions(){
   const positions=new Map();
-  blocks.forEach(b=>corners(b).forEach(([x,y])=>{
+  blocks.forEach(b=>corners(b).forEach(([x,y],corner)=>{
     const key=Math.round(x*1000)+","+Math.round(y*1000),current=positions.get(key);
     if(current){
       if(selectedIds.has(b.id))current.selected=true;
       current.baseHeight=Math.min(current.baseHeight,Number(b.baseHeight||0));
-      if(scaffoldHeight(b)>current.height){current.fl=Number(b.fl||0);current.height=scaffoldHeight(b);current.firstHeight=firstFloorHeight(b);current.floorCount=floorCountOf(b)}
-    }else positions.set(key,{x,y,selected:selectedIds.has(b.id),baseHeight:Number(b.baseHeight||0),fl:Number(b.fl||0),height:scaffoldHeight(b),firstHeight:firstFloorHeight(b),floorCount:floorCountOf(b)});
+      if(scaffoldHeight(b)>current.height){current.fl=Number(b.fl||0);current.height=scaffoldHeight(b);current.firstHeight=firstFloorHeight(b);current.floorCount=floorCountOf(b);current.block=b;current.corner=corner}
+    }else positions.set(key,{x,y,selected:selectedIds.has(b.id),baseHeight:Number(b.baseHeight||0),fl:Number(b.fl||0),height:scaffoldHeight(b),firstHeight:firstFloorHeight(b),floorCount:floorCountOf(b),block:b,corner});
   }));
   return[...positions.values()];
 }
@@ -67,7 +68,7 @@ function planEdgeSegments(sourceBlocks=blocks){
     const c=corners(b),horizontalKind=Number(b.rotation)===0?"long":"end",verticalKind=Number(b.rotation)===0?"end":"long";
     [[c[0],c[1],"h",horizontalKind],[c[2],c[3],"h",horizontalKind],[c[0],c[2],"v",verticalKind],[c[1],c[3],"v",verticalKind]].forEach(([start,end,axis,kind])=>{
       const fixed=Math.round((axis==="h"?start[1]:start[0])*1000),a=axis==="h"?start[0]:start[1],z=axis==="h"?end[0]:end[1],lo=Math.min(a,z),hi=Math.max(a,z),key=axis+":"+fixed;
-      if(!lines.has(key))lines.set(key,[]);lines.get(key).push({lo,hi,kind});
+      if(!lines.has(key))lines.set(key,[]);lines.get(key).push({lo,hi,kind,protection:b.endProtection??"handrail"});
     });
   });
   const standard=[1829,1524,1219,914,610,600,475];
@@ -77,7 +78,7 @@ function planEdgeSegments(sourceBlocks=blocks){
     const points=[...new Set(segments.flatMap(segment=>[segment.lo,segment.hi]).map(v=>Math.round(v*1000)))].sort((a,z)=>a-z);
     for(let i=0;i<points.length-1;i++){
       const lo=points[i]/1000,hi=points[i+1]/1000,mid=(lo+hi)/2,covering=segments.filter(segment=>mid>segment.lo-0.001&&mid<segment.hi+0.001);
-      if(covering.length)edges.push({size:nearestRail((hi-lo)*mmPerPx),kind:covering[0].kind,coverage:covering.length});
+      if(covering.length)edges.push({size:nearestRail((hi-lo)*mmPerPx),kind:covering[0].kind,coverage:covering.length,protection:covering[0].protection});
     }
   });
   return edges;
@@ -113,11 +114,9 @@ function solveColumn(rawHeight){
 function verticalBreakdown(posts){
   const lower=new Map(),regular=new Map(),jacks=new Map();let unresolved=0;
   posts.forEach(post=>{
-    const plan=solveColumn(post.firstHeight);if(!plan){unresolved++;return}
-    lower.set(plan.lower,(lower.get(plan.lower)||0)+1);
-    plan.regular.forEach(size=>regular.set(size,(regular.get(size)||0)+1));
-    for(let i=1;i<post.floorCount;i++)regular.set(1900,(regular.get(1900)||0)+1);
-    regular.set(950,(regular.get(950)||0)+1);
+    const plan=solveColumn(post.firstHeight),parts=columnParts(post.block,post.corner);
+    if(!plan||!validColumnParts(post.block,parts)){unresolved++;return}
+    parts.forEach(part=>{const target=part.kind==="lower"?lower:regular;target.set(part.size,(target.get(part.size)||0)+1)});
     jacks.set(plan.jack,(jacks.get(plan.jack)||0)+1);
   });
   const rows=[];
@@ -289,7 +288,7 @@ function renderBlocks(){
     const{w,h}=dimensions(b),selected=selectedIds.has(b.id),el=document.createElement("button");
     el.className="scaffold-block"+(selected?" selected":"")+(selected&&selectedIds.size>1?" multi-selected":"")+(b.hasStair?" has-stair":"");el.dataset.id=b.id;
     Object.assign(el.style,{left:b.x*zoom+"px",top:b.y*zoom+"px",width:w*zoom+"px",height:h*zoom+"px",borderColor:COLORS[b.span],backgroundColor:COLORS[b.span]+"30","--c":COLORS[b.span]});
-    el.innerHTML='<span class="block-size">'+b.span+" × "+b.width+(b.hasStair?' <em>階段</em>':'')+"</span><span class=\"resize-handle\" title=\"横方向へ延長\" aria-label=\"横方向へ延長\"></span>";
+    el.innerHTML=railPlanMarkup(b)+'<span class="block-size">'+b.span+" × "+b.width+(b.hasStair?' <em>階段</em>':'')+"</span><span class=\"resize-handle\" title=\"横方向へ延長\" aria-label=\"横方向へ延長\"></span>";
     const handle=el.querySelector(".resize-handle");
     handle.addEventListener("pointerdown",e=>{e.preventDefault();e.stopPropagation();const p=point(e),size=dimensions(b);resize={id:b.id,start:p,current:p,origin:{...b},w:size.w,h:size.h};stage.classList.add("series-placing");stage.setPointerCapture(e.pointerId);renderResizePreview()});
     el.addEventListener("pointerdown",e=>{
@@ -339,16 +338,18 @@ function selectBlocks(ids){
   selectedIds=new Set(ids.filter(id=>blocks.some(b=>b.id===id)));selectedId=[...selectedIds].at(-1)??null;renderBlocks();updateSelectionEditor();
 }
 function selectBlock(id){selectBlocks(id?[id]:[])}
-function sectionPostAllocation(block){
-  const first=Math.round(firstFloorHeight(block)),parts=[];
-  const plan=solveColumn(first);
-  if(plan){
-    parts.push({label:"下部支柱 "+plan.lower,weight:plan.lower});
-    plan.regular.forEach(size=>parts.push({label:"支柱 "+size,weight:size}));
-  }else parts.push({label:"下部構成 要確認",weight:Math.max(first,1)});
-  for(let i=1;i<floorCountOf(block);i++)parts.push({label:"支柱 1900",weight:1900});
-  parts.push({label:"支柱 950",weight:950});
-  return parts;
+function automaticColumnParts(block){
+  const plan=solveColumn(firstFloorHeight(block));if(!plan)return[];
+  return[{kind:"lower",size:plan.lower},...plan.regular.flatMap(size=>{const parts=[];while(size>1900){parts.push({kind:"regular",size:1900});size-=1900}if(size)parts.push({kind:"regular",size});return parts}),...Array.from({length:floorCountOf(block)-1},()=>({kind:"regular",size:1900})),{kind:"regular",size:950}];
+}
+const columnTotal=parts=>parts.reduce((sum,part)=>sum+Number(part.size),0);
+const columnParts=(block,corner=0)=>block?.columnParts?.[corner]??automaticColumnParts(block);
+function validColumnParts(block,parts){
+  return automaticColumnParts(block).length>0&&parts.length>0&&parts.every((p,i)=>Number.isInteger(p.size)&&p.size>0&&(i===0?p.kind==="lower":p.kind==="regular"))&&columnTotal(parts)===columnTotal(automaticColumnParts(block));
+}
+function sectionPostAllocation(block,corner=0){
+  const parts=columnParts(block,corner);
+  return parts.length?parts.map(part=>({label:(part.kind==="lower"?"下部支柱 ":"支柱 ")+part.size,weight:part.size})):[{label:"下部構成 要確認",weight:Math.max(firstFloorHeight(block),1)}];
 }
 function renderSelectionSection(selected){
   const sourceItems=[...(Array.isArray(selected)?selected:[selected])];
@@ -362,17 +363,18 @@ function renderSelectionSection(selected){
   const bays=items.map((block,index)=>{
     const bayLength=sectionLength(block),x1=cursor,x2=index===items.length-1?right:cursor+(right-left)*bayLength/totalSpan;cursor=x2;
     const base=Number(block.baseHeight||0),blockFloorLevels=workFloorHeights(block).map(height=>base+height);
-    const floors=blockFloorLevels.map((level,floorIndex)=>{const y=yAtFL(level),r450=yAtFL(level+450),r900=yAtFL(level+900),lower=floorIndex>0?blockFloorLevels[floorIndex-1]:null;return`<line class="section-floor" x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"/><line class="section-handrail" x1="${x1}" y1="${r450}" x2="${x2}" y2="${r450}"/><line class="section-handrail" x1="${x1}" y1="${r900}" x2="${x2}" y2="${r900}"/>${block.hasStair&&lower!==null?`<line class="section-stair" x1="${x1+3}" y1="${yAtFL(lower)}" x2="${x2-3}" y2="${y}"/>`:""}`}).join("");
-    return`<line class="section-post" x1="${x1}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x1}" y2="${yAtFL(base)}"/>${index===items.length-1?`<line class="section-post" x1="${x2}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x2}" y2="${yAtFL(base)}"/>`:""}${floors}<circle class="section-post-mark" cx="${x1}" cy="${yAtFL(base)}" r="2.3"/>${index===items.length-1?`<circle class="section-post-mark" cx="${x2}" cy="${yAtFL(base)}" r="2.3"/>`:""}<text class="section-bay-label" x="${(x1+x2)/2}" y="151" text-anchor="middle">${bayLength}</text>`;
+    const floors=blockFloorLevels.map((level,floorIndex)=>{const y=yAtFL(level),r450=yAtFL(level+450),r900=yAtFL(level+900),lower=floorIndex>0?blockFloorLevels[floorIndex-1]:null;return`<line class="section-floor" x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"/>${[block.outerProtection,block.innerProtection].map((type,side)=>type==="none"?"":`<line class="section-handrail ${type}" x1="${x1}" y1="${r450+side*2}" x2="${x2}" y2="${r450+side*2}"/><line class="section-handrail ${type}" x1="${x1}" y1="${r900+side*2}" x2="${x2}" y2="${r900+side*2}"/>`).join("")}${block.hasStair&&lower!==null?`<line class="section-stair" x1="${x1+3}" y1="${yAtFL(lower)}" x2="${x2-3}" y2="${y}"/>`:""}`}).join("");
+    const jointMarks=(x,corner)=>{const parts=columnParts(block,corner),total=columnTotal(parts);let used=0;return parts.slice(0,-1).map(part=>{used+=part.size;const y=yAtFL(base)-(yAtFL(base)-yAtFL(Number(block.fl)+900))*used/total;return `<line class="section-joint" x1="${x-4}" y1="${y}" x2="${x+4}" y2="${y}"/>`}).join("")};
+    return`${jointMarks(x1,0)}${index===items.length-1?jointMarks(x2,sectionAxis==="x"?1:2):""}<line class="section-post" x1="${x1}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x1}" y2="${yAtFL(base)}"/>${index===items.length-1?`<line class="section-post" x1="${x2}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x2}" y2="${yAtFL(base)}"/>`:""}${floors}<circle class="section-post-mark" cx="${x1}" cy="${yAtFL(base)}" r="2.3"/>${index===items.length-1?`<circle class="section-post-mark" cx="${x2}" cy="${yAtFL(base)}" r="2.3"/>`:""}<text class="section-bay-label" x="${(x1+x2)/2}" y="151" text-anchor="middle">${bayLength}</text>`;
   }).join("");
   const floorDimensions=floorLevels.map(level=>{const y=yAtFL(level);return`<line class="section-extension" x1="72" y1="${y}" x2="${left-3}" y2="${y}"/><line class="section-level-tick" x1="69" y1="${y}" x2="75" y2="${y}"/><text class="section-level-label" x="66" y="${y+3}" text-anchor="end">作業床高さ ${level.toLocaleString()}</text>`}).join("");
   const buildingDimensions=buildingLevels.map((level,index)=>{const y=yAtFL(level);return`<line class="section-building-level" x1="${left-8}" y1="${y}" x2="${right+8}" y2="${y}"/><rect class="section-building-level-label-bg" x="${right+9}" y="${y-10}" width="48" height="10" rx="2"/><text class="section-building-level-label" x="${right+11}" y="${y-3}">${index+1}FL ${level.toLocaleString()}mm</text>`}).join("");
   const topLevel=Math.max(...upperLevels),topY=yAtFL(topLevel),baseY=yAtFL(minBase),zeroY=yAtFL(0);
   const topLabelY=Math.max(16,topY+2);
-  const allocationBlock=items.reduce((best,item)=>Number(item.fl)>Number(best.fl)?item:best,items[0]),allocationParts=sectionPostAllocation(allocationBlock),allocationTotal=allocationParts.reduce((sum,part)=>sum+part.weight,0)||1;
+  const allocationBlock=items.find(b=>b.id===$("columnBlock").value)??items.reduce((best,item)=>Number(item.fl)>Number(best.fl)?item:best,items[0]),allocationParts=sectionPostAllocation(allocationBlock,Number($("columnCorner").value)||0),allocationTotal=allocationParts.reduce((sum,part)=>sum+part.weight,0)||1;
   let allocationY=baseY;
-  const allocationSvg=allocationParts.map(part=>{const next=allocationY-(baseY-topY)*part.weight/allocationTotal,mid=(allocationY+next)/2,svgPart=`<line class="section-allocation" x1="292" y1="${allocationY}" x2="292" y2="${next}" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-allocation-tick" x1="288" y1="${allocationY}" x2="296" y2="${allocationY}"/><text class="section-allocation-label" x="299" y="${mid+2}">${part.label}</text>`;allocationY=next;return svgPart}).join("")+`<line class="section-allocation-tick" x1="288" y1="${topY}" x2="296" y2="${topY}"/><text class="section-allocation-title" x="288" y="${Math.max(12,topY-6)}">支柱構成</text><text class="section-allocation-label" x="299" y="${baseY+10}">＋標準ジャッキ</text>`;
-  const svg=`<svg viewBox="0 0 420 178" role="img" aria-label="長手方向 ${items.length}区画、合計${totalSpan}ミリ。作業床高さ、建物FL、支柱構成、足場上部レベルの寸法入り"><defs><marker id="sectionArrow" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 Z" class="section-arrow"/></marker></defs><line class="section-ground" x1="${left-10}" y1="${baseY+3}" x2="${right+10}" y2="${baseY+3}"/><text class="section-surface-label" x="${left-12}" y="${baseY+13}" text-anchor="end">設置面</text>${chartMin<=0&&zeroY>=top&&zeroY<=bottom?`<line class="section-fl-zero" x1="72" y1="${zeroY}" x2="${right+10}" y2="${zeroY}"/><text class="section-fl-zero-label" x="66" y="${zeroY+3}" text-anchor="end">FL 0</text>`:""}${buildingDimensions}${floorDimensions}${bays}<text class="section-post-label" x="${left}" y="${top-3}">支柱位置（${items.length+1}箇所）</text>${allocationSvg}<line class="section-dimension" x1="350" y1="${baseY}" x2="350" y2="${topY}" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${right+3}" y1="${topY}" x2="354" y2="${topY}"/><line class="section-extension" x1="${right+3}" y1="${baseY}" x2="354" y2="${baseY}"/><rect class="section-upper-label-bg" x="358" y="${topLabelY-8}" width="58" height="20" rx="2"/><text class="section-height" x="360" y="${topLabelY}"><tspan x="360">上部 FL</tspan><tspan x="360" dy="9">${topLevel.toLocaleString()} mm</tspan></text><line class="section-dimension" x1="${left}" y1="160" x2="${right}" y2="160" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${left}" y1="${baseY+3}" x2="${left}" y2="164"/><line class="section-extension" x1="${right}" y1="${baseY+3}" x2="${right}" y2="164"/><text class="section-width" x="${(left+right)/2}" y="174" text-anchor="middle">合計 ${totalSpan.toLocaleString()} mm</text><text class="section-badge" x="${left}" y="11">${items.length}区画・作業床最大${Math.max(...items.map(floorCountOf))}層</text></svg>`;
+  const allocationSvg=allocationParts.map((part,partIndex)=>{const next=allocationY-(baseY-topY)*part.weight/allocationTotal,mid=(allocationY+next)/2,svgPart=`<line class="section-allocation" x1="292" y1="${allocationY}" x2="292" y2="${next}" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-allocation-tick" x1="288" y1="${allocationY}" x2="296" y2="${allocationY}"/><text class="section-allocation-label editable-column" tabindex="0" role="button" data-column-part="${partIndex}" data-column-block="${allocationBlock.id}" x="299" y="${mid+2}">${part.label}</text>`;allocationY=next;return svgPart}).join("")+`<line class="section-allocation-tick" x1="288" y1="${topY}" x2="296" y2="${topY}"/><text class="section-allocation-title" x="288" y="${Math.max(12,topY-6)}">支柱構成</text><text class="section-allocation-label" x="299" y="${baseY+10}">＋標準ジャッキ</text>`;
+  const svg=`<svg viewBox="0 0 420 178" role="img" aria-label="長手方向 ${items.length}区画、合計${totalSpan}ミリ。作業床高さ、建物FL、支柱構成、足場上部レベルの寸法入り"><defs><marker id="sectionArrow" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 Z" class="section-arrow"/></marker></defs><line class="section-ground" x1="${left-10}" y1="${baseY+3}" x2="${right+10}" y2="${baseY+3}"/><text class="section-surface-label" x="${left-12}" y="${baseY+13}" text-anchor="end">設置面</text>${chartMin<=0&&zeroY>=top&&zeroY<=bottom?`<line class="section-fl-zero" x1="72" y1="${zeroY}" x2="${right+10}" y2="${zeroY}"/><text class="section-fl-zero-label" x="66" y="${zeroY+3}" text-anchor="end">FL 0</text>`:""}${buildingDimensions}${floorDimensions}${bays}<text class="section-post-label" x="${left}" y="${top-3}">支柱位置（${items.length+1}箇所）</text>${allocationSvg}<line class="section-dimension" x1="350" y1="${baseY}" x2="350" y2="${topY}" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${right+3}" y1="${topY}" x2="354" y2="${topY}"/><line class="section-extension" x1="${right+3}" y1="${baseY}" x2="354" y2="${baseY}"/><rect class="section-upper-label-bg" x="358" y="${topLabelY-8}" width="58" height="20" rx="2"/><text class="section-height" x="360" y="${topLabelY}"><tspan x="360">上部 FL</tspan><tspan x="360" dy="9">${topLevel.toLocaleString()} mm</tspan></text><line class="section-dimension" x1="${left}" y1="160" x2="${right}" y2="160" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${left}" y1="${baseY+3}" x2="${left}" y2="164"/><line class="section-extension" x1="${right}" y1="${baseY+3}" x2="${right}" y2="164"/><text class="section-width" x="${(left+right)/2}" y="174" text-anchor="middle">合計 ${totalSpan.toLocaleString()} mm</text><text class="section-badge" x="${left}" y="11">${items.length}区画・作業床最大${Math.max(...items.map(floorCountOf))}層・外 ${railNames[allocationBlock.outerProtection]}／内 ${railNames[allocationBlock.innerProtection]}</text></svg>`;
   preview.innerHTML=svg;$("sectionModalView").innerHTML=svg;
 }
 function updateSelectionEditor(){
@@ -392,6 +394,7 @@ function updateSelectionEditor(){
   $("selectedLevels").textContent=tops.every(v=>v===tops[0])&&floorCounts.every(v=>v===floorCounts[0])?floorCounts[0]+"層（最上段"+tops[0].toLocaleString()+"mm）":"複数";
   $("selectedSpan").value=same("span")?String(first.span):"1829";$("selectedWidth").value=same("width")?String(first.width):"610";
   $("selectedKind").value=selected.every(b=>b.hasStair)?"stair":"normal";
+  renderSelectedRails(selected);if($("sectionModal").open)loadColumnEditor();
 }
 function applyElevationChange(key,value){
   if(!selectedIds.size||value==="")return;const number=Number(value);
@@ -413,11 +416,12 @@ function updateSummary(){
 function quantities(){
   if(!blocks.length)return[];
   const floorCount=floorCountOf,posts=uniquePostPositions(),postCount=posts.length;
-  const rootTotals=new Map(),floorRailTotals=new Map(),workHandrails=new Map(),workBraces=new Map(),deckTotals=new Map(),floorLayers=new Map();let stairOpeningCount=0;
+  const rootTotals=new Map(),floorRailTotals=new Map(),workHandrails=new Map(),workBraces=new Map(),workAdvance=new Map(),deckTotals=new Map(),floorLayers=new Map();let stairOpeningCount=0;
   uniquePlanEdges().forEach(edge=>rootTotals.set(edge.size,(rootTotals.get(edge.size)||0)+1));
   blocks.forEach(b=>{
     const count=floorCount(b),handrailSides=(b.outerProtection==="handrail"?1:0)+(b.innerProtection==="handrail"?1:0),braceSides=(b.outerProtection==="brace"?1:0)+(b.innerProtection==="brace"?1:0);
     workHandrails.set(b.span,(workHandrails.get(b.span)||0)+count*2*handrailSides);workBraces.set(b.span,(workBraces.get(b.span)||0)+count*braceSides);
+    workAdvance.set(b.span,(workAdvance.get(b.span)||0)+count*((b.outerProtection==="advance"?1:0)+(b.innerProtection==="advance"?1:0)));
     const boardWidths=b.width<=610?[490]:b.width<=914?[490,240]:[490,490],boardLanes=new Map();
     boardWidths.forEach(boardWidth=>boardLanes.set(boardWidth,(boardLanes.get(boardWidth)||0)+1));
     const stairOpenings=b.hasStair&&b.span===1829?Math.max(0,count-1):0;stairOpeningCount+=stairOpenings;
@@ -426,7 +430,7 @@ function quantities(){
   });
   floorLayers.forEach(layerBlocks=>{
     uniquePlanEdges(layerBlocks).forEach(edge=>floorRailTotals.set(edge.size,(floorRailTotals.get(edge.size)||0)+1));
-    exposedEndEdges(layerBlocks).forEach(edge=>workHandrails.set(edge.size,(workHandrails.get(edge.size)||0)+2));
+    exposedEndEdges(layerBlocks).filter(edge=>edge.protection!=="none").forEach(edge=>workHandrails.set(edge.size,(workHandrails.get(edge.size)||0)+2));
   });
   const group=(name,detail="")=>[name,detail,0,"","group"],rows=[group("支柱","支柱位置 "+postCount+"箇所"),...verticalBreakdown(posts),group("根がらみ材")];
   [...rootTotals].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"平面外周（接続部重複なし）",count,"本"]));
@@ -436,6 +440,7 @@ function quantities(){
   rows.push(group("手摺"));
   [...workHandrails].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQ手すり "+size,"各作業床450/900・長手／端部",count,"本"]));
   [...workBraces].sort((a,b)=>b[0]-a[0]).forEach(([size,count])=>rows.push(["IQブレス "+size,"各作業床・ブレス設定側",count,"本"]));
+  [...workAdvance].sort((a,b)=>b[0]-a[0]).filter(([,count])=>count>0).forEach(([size,count])=>rows.push(["先行手すり "+size,"各作業床・先行手すり設定側",count,"枚"]));
   const stairCount=stairOpeningCount;
   rows.push(group("昇降"),["階段 1900","IQアルミカイダン19",stairCount,"基"],["階段手すり","IQカイダンレール",stairCount,"本"]);return rows;
 }
@@ -456,7 +461,7 @@ function csvQuantityMatrix(){
   ensure("HPJ5-450","標準ジャッキベース（AJP）","本");
   RAIL_SIZES.forEach(size=>ensure(`IQ手すり ${size}`,"IQ手すり","本"));
   DECK_LENGTHS.forEach(length=>DECK_WIDTHS.forEach(boardWidth=>ensure(`布板 ${length}×${boardWidth}`,"Sウォーク","枚")));
-  Object.keys(COLORS).map(Number).forEach(size=>ensure(`IQブレス ${size}`,"IQブレス","本"));
+  Object.keys(COLORS).map(Number).forEach(size=>{ensure(`IQブレス ${size}`,"IQブレス","本");ensure(`先行手すり ${size}`,"先行手すり","枚")});
   ensure("階段 1900","IQアルミカイダン19","基");ensure("階段手すり","IQカイダンレール","本");
   verticalBreakdown(uniquePostPositions()).forEach(([name,detail,quantity,unit])=>add(name,detail,unit,"支柱",quantity));
   uniquePlanEdges().forEach(edge=>add(`IQ手すり ${edge.size}`,"IQ手すり","本","根がらみ材",1));
@@ -470,8 +475,9 @@ function csvQuantityMatrix(){
       boardLanes.forEach((lanes,boardWidth)=>add(`布板 ${block.span}×${boardWidth}`,"Sウォーク","枚",floorColumn,Math.max(0,lanes-(boardWidth===490&&hasStairOpening?1:0))));
       const handrailSides=(block.outerProtection==="handrail"?1:0)+(block.innerProtection==="handrail"?1:0),braceSides=(block.outerProtection==="brace"?1:0)+(block.innerProtection==="brace"?1:0);
       add(`IQ手すり ${block.span}`,"IQ手すり","本",railColumn,2*handrailSides);add(`IQブレス ${block.span}`,"IQブレス","本",railColumn,braceSides);
+      add(`先行手すり ${block.span}`,"先行手すり","枚",railColumn,(block.outerProtection==="advance"?1:0)+(block.innerProtection==="advance"?1:0));
     });
-    exposedEndEdges(stageBlocks).forEach(edge=>add(`IQ手すり ${edge.size}`,"IQ手すり","本",railColumn,2));
+    exposedEndEdges(stageBlocks).filter(edge=>edge.protection!=="none").forEach(edge=>add(`IQ手すり ${edge.size}`,"IQ手すり","本",railColumn,2));
     if(stageIndex<maxFloors-1){
       const stairColumn=`${stageIndex+1}→${stageIndex+2}段目 昇降`,stairCount=blocks.filter(block=>block.hasStair&&block.span===1829&&floorCountOf(block)>stageIndex+1).length;
       add("階段 1900","IQアルミカイダン19","基",stairColumn,stairCount);add("階段手すり","IQカイダンレール","本",stairColumn,stairCount);
@@ -518,6 +524,7 @@ function downloadBlob(name,blob){
 }
 function applyProjectData(data){
   if(!Array.isArray(data.blocks))throw new Error("配置データがありません");
+  if(data.defaultRails)defaultRails=normalizeRails(data.defaultRails);renderRailFields();
   history=[...history,structuredClone(blocks)];blocks=data.blocks.map(normalizeBlock);
   if(Number.isFinite(data.mmPerPx))mmPerPx=data.mmPerPx;
   if(Number.isFinite(data.drawingScale)){drawingScale=data.drawingScale;$("drawingScale").value=drawingScale}
@@ -532,7 +539,7 @@ async function saveProjectZip(){
   try{
     if(!window.JSZip)throw new Error("ZIP機能を読み込めませんでした");status("元図面と配置データをZIPへ保存しています…");
     const fallbackName=drawingKind==="jww"?"drawing.jww":"drawing.pdf",zip=new window.JSZip(),safeSourceName=(pdfSourceName||fallbackName).replace(/[\\/:*?"<>|]/g,"_"),sourcePath=pdfSourceBytes?"drawing/"+safeSourceName:null,drawing=sourcePath?{name:pdfSourceName,path:sourcePath,kind:drawingKind||"pdf",pageNumber}:null;
-    const data={version:7,blocks,mmPerPx,drawingScale,defaultFL,buildingFLs,defaultBaseHeight,defaultFloorCount,panelCollapsed,pageNumber,savedAt:new Date().toISOString(),drawing,pdf:drawing?.kind==="pdf"?drawing:null};
+    const data={version:8,defaultRails,blocks,mmPerPx,drawingScale,defaultFL,buildingFLs,defaultBaseHeight,defaultFloorCount,panelCollapsed,pageNumber,savedAt:new Date().toISOString(),drawing,pdf:drawing?.kind==="pdf"?drawing:null};
     zip.file("project.json",JSON.stringify(data,null,2));if(sourcePath)zip.file(sourcePath,pdfSourceBytes,{binary:true,compression:"STORE"});
     const blob=await zip.generateAsync({type:"blob",compression:"DEFLATE",compressionOptions:{level:6}});downloadBlob("足場拾いプロジェクト.zip",blob);
     status(sourcePath?(drawingKind==="jww"?"JWWを含むプロジェクトZIPを保存しました":"PDFを含むプロジェクトZIPを保存しました"):"配置データをプロジェクトZIPへ保存しました（図面未読込）");
@@ -615,7 +622,7 @@ stage.addEventListener("click",e=>{
   if(tool!=="add"){selectBlock(null);return}
   const firstHeight=defaultFL-defaultBaseHeight;if(firstHeight<=0){status("1段目作業床高さは設置面高さより大きくしてください");return}
   if(placementStair&&(span!==1829||defaultFloorCount<2)){status("階段は1829スパン・作業床2層以上で配置してください");return}
-  const w=span/mmPerPx,d=width/mmPerPx,raw={id:uid(),x:Math.max(0,p.x-w/2),y:Math.max(0,p.y-d/2),span,width,firstFloorFL:defaultFL,floorCount:defaultFloorCount,baseHeight:defaultBaseHeight,rotation:0,outerProtection:"handrail",innerProtection:"handrail",hasStair:placementStair};
+  const w=span/mmPerPx,d=width/mmPerPx,raw={id:uid(),x:Math.max(0,p.x-w/2),y:Math.max(0,p.y-d/2),span,width,firstFloorFL:defaultFL,floorCount:defaultFloorCount,baseHeight:defaultBaseHeight,rotation:0,...defaultRails,hasStair:placementStair};
   const result=snapBlock(raw),b=result.block;commit([...blocks,b]);selectBlock(b.id);status(result.snapped?"支柱位置に吸着して配置しました":span+"mmスパンを配置しました");
 });
 stage.addEventListener("pointermove",e=>{
@@ -633,7 +640,7 @@ stage.addEventListener("pointermove",e=>{
 stage.addEventListener("pointerup",e=>{
   if(series){
     series.current=point(e);const count=seriesCount(series),direction=series.current.x>=series.start.x?1:-1;
-    const raw={id:uid(),x:Math.max(0,series.start.x-series.w/2),y:Math.max(0,series.start.y-series.d/2),span:series.span,width:series.width,firstFloorFL:series.firstFloorFL,floorCount:series.floorCount,baseHeight:series.baseHeight,rotation:0,outerProtection:"handrail",innerProtection:"handrail",hasStair:series.hasStair};
+    const raw={id:uid(),x:Math.max(0,series.start.x-series.w/2),y:Math.max(0,series.start.y-series.d/2),span:series.span,width:series.width,firstFloorFL:series.firstFloorFL,floorCount:series.floorCount,baseHeight:series.baseHeight,rotation:0,...defaultRails,hasStair:series.hasStair};
     const first=snapBlock(raw).block,created=[];
     for(let i=0;i<count;i++){
       const candidate={...first,id:i===0?first.id:uid(),x:Math.max(0,first.x+i*direction*series.w)};
@@ -675,7 +682,7 @@ $("changeSelected").onclick=()=>{
   commit(blocks.map(block=>selectedIds.has(block.id)?{...block,span:asStair?1829:nextSpan,width:nextWidth,hasStair:asStair}:block));
   updateSelectionEditor();status(selected.length+"件を "+(asStair?"1829 × "+nextWidth+" 階段付き":nextSpan+" × "+nextWidth)+" に変更しました");
 };
-const openSectionModal=()=>{if(selectedIds.size&&!$("sectionModal").open)$("sectionModal").showModal()};
+const openSectionModal=()=>{if(selectedIds.size&&!$("sectionModal").open){$("sectionModal").showModal();loadColumnEditor();renderSelectionSection(selectedBlocks())}};
 $("selectionSectionView").onclick=openSectionModal;
 $("selectionSectionView").onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openSectionModal()}};
 $("closeSectionModal").onclick=()=>$("sectionModal").close();
@@ -696,8 +703,80 @@ $("projectInput").onchange=async e=>{const file=e.target.files[0];if(!file)retur
 $("csv").onclick=()=>{const matrix=csvQuantityMatrix(),rows=[matrix.header,...matrix.rows],csv="\ufeff"+rows.map(r=>r.map(v=>'"'+String(v).replaceAll('"','""')+'"').join(",")).join("\r\n");download("足場概算数量.csv",csv,"text/csv;charset=utf-8")};
 $("print").onclick=()=>window.print();
 
+const railKeys=["outerProtection","innerProtection","endProtection"];
+const railLabels=["外側","内側","妻側"];
+const railNames={handrail:"通常手すり",advance:"先行手すり",none:"なし",brace:"ブレス（従来設定）"};
+function normalizeRails(raw){return Object.fromEntries(railKeys.map(key=>[key,["handrail","advance","none","brace"].includes(raw[key])?raw[key]:"handrail"]))}
+function railFieldsMarkup(prefix,mixed=false){return railKeys.map((key,i)=>`<label for="${prefix}${key}">${railLabels[i]}</label><select id="${prefix}${key}">${mixed?'<option value="">変更しない（混在）</option>':""}${(key==="endProtection"?["handrail","none"]:["advance","handrail","none","brace"]).map(value=>`<option value="${value}">${railNames[value]}</option>`).join("")}</select>`).join("")}
+function renderRailFields(){
+  $("defaultRailFields").innerHTML=railFieldsMarkup("default");
+  railKeys.forEach(key=>{$("default"+key).value=defaultRails[key];$("default"+key).onchange=e=>{defaultRails[key]=e.target.value;saveLocal()}});
+}
+function renderSelectedRails(selected){
+  $("selectedRailFields").innerHTML=railFieldsMarkup("selected",true);
+  railKeys.forEach(key=>{$("selected"+key).value=selected.every(b=>b[key]===selected[0][key])?selected[0][key]:""});
+}
+function railPlanMarkup(b){
+  const edges=b.rotation===90?[[100,0,100,100,b.outerProtection],[0,0,0,100,b.innerProtection],[0,0,100,0,b.endProtection],[0,100,100,100,b.endProtection]]:[[0,0,100,0,b.outerProtection],[0,100,100,100,b.innerProtection],[0,0,0,100,b.endProtection],[100,0,100,100,b.endProtection]];
+  const lines=edges.map(([x1,y1,x2,y2,type])=>type==="none"?"":`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" class="plan-rail ${type}"/>`).join("");
+  return `<svg class="plan-rails" viewBox="-12 -14 124 128" preserveAspectRatio="none" aria-hidden="true">${lines}<text x="${b.rotation===90?108:50}" y="${b.rotation===90?50:-4}" text-anchor="middle">外</text></svg>`;
+}
+function columnEditorBlock(){return selectedBlocks().find(b=>b.id===$("columnBlock").value)??selectedBlocks()[0]}
+function loadColumnEditor(){
+  const selected=selectedBlocks();if(!selected.length)return;
+  const previous=$("columnBlock").value;$("columnBlock").innerHTML="";
+  selected.forEach((b,i)=>{const option=document.createElement("option");option.value=b.id;option.textContent=`スパン${i+1}：${b.span} × ${b.width}（${floorCountOf(b)}層）`;$("columnBlock").appendChild(option)});
+  $("columnBlock").value=selected.some(b=>b.id===previous)?previous:selected.reduce((a,b)=>a.fl>b.fl?a:b).id;
+  columnReference=columnEditorBlock();columnDraft=structuredClone(columnParts(columnReference,Number($("columnCorner").value)||0));renderColumnRows();
+}
+function renderColumnRows(){
+  $("columnRows").innerHTML=columnDraft.map((part,i)=>`<div class="column-row"><span>${i+1}</span><strong>${part.kind==="lower"?"下部支柱":"支柱"}</strong><input type="number" min="1" step="1" list="columnSizes" value="${Number(part.size)}" data-column-size="${i}" aria-label="下から${i+1}本目の支柱長さ（mm）"><span>mm</span><div class="column-row-actions"><button type="button" data-column-split="${i}">分割</button><button type="button" data-column-join="${i}" ${i===0||i===columnDraft.length-1?"disabled":""}>上と結合</button><button type="button" data-column-up="${i}" ${i<2?"disabled":""} aria-label="下から${i+1}本目を下へ移動">↓</button><button type="button" data-column-down="${i}" ${i===0||i===columnDraft.length-1?"disabled":""} aria-label="下から${i+1}本目を上へ移動">↑</button><button type="button" data-column-delete="${i}" ${i===0?"disabled":""}>削除</button></div></div>`).join("");
+  validateColumnDraft();
+}
+function validateColumnDraft(){
+  if(!columnReference)return;
+  const required=columnTotal(automaticColumnParts(columnReference)),total=columnTotal(columnDraft),valid=validColumnParts(columnReference,columnDraft);
+  const custom=columnDraft.some(p=>!(p.kind==="lower"?LOWER_POST_SIZES:POST_SIZES).includes(p.size));
+  const message=`支柱長さ合計 ${Number.isFinite(total)?total.toLocaleString():"―"} mm ／ 必要 ${required.toLocaleString()} mm`;
+  $("columnValidation").textContent=message+(valid?(custom?"。自由入力の規格が含まれます。部材を確認してください。":"。反映できます。"):"。合計を合わせてください。作業床・ジャッキ高さは変わりません。");
+  $("columnValidation").classList.toggle("invalid",!valid);$("applyColumnParts").disabled=!valid;
+}
+function columnTargets(){
+  const corner=$("columnCorner").value,source=corner==="all"?selectedBlocks():[columnEditorBlock()],positions=new Set();
+  source.forEach(b=>corners(b).forEach(([x,y],i)=>{if(corner==="all"||i===Number(corner))positions.add(Math.round(x*1000)+","+Math.round(y*1000))}));
+  return blocks.flatMap(b=>corners(b).flatMap(([x,y],i)=>positions.has(Math.round(x*1000)+","+Math.round(y*1000))?[{block:b,corner:i}]:[]));
+}
+function applyColumnDraft(reset=false){
+  const targets=columnTargets();if(!targets.length)return;
+  if(!reset&&targets.some(t=>!validColumnParts(t.block,columnDraft))){$("columnValidation").textContent="高さの異なる支柱が含まれています。同じ高さのスパンを選ぶか、支柱位置を個別に指定してください。";return}
+  const next=blocks.map(b=>{const matching=targets.filter(t=>t.block.id===b.id);if(!matching.length)return b;const parts=structuredClone(b.columnParts??{});matching.forEach(t=>{if(reset)delete parts[t.corner];else parts[t.corner]=structuredClone(columnDraft)});return{...b,columnParts:parts}});
+  commit(next);updateSelectionEditor();status(reset?"支柱を自動割付に戻しました":"支柱割付を反映しました（連結部の共用支柱にも反映）");
+}
+renderRailFields();
+$("applyRailsAll").onclick=()=>{if(!blocks.length)return;commit(blocks.map(b=>({...b,...defaultRails})));updateSelectionEditor();status("全足場へ手すり設定を反映しました")};
+$("applySelectedRails").onclick=()=>{const changes=Object.fromEntries(railKeys.map(key=>[key,$("selected"+key).value]).filter(([,value])=>value));commit(blocks.map(b=>selectedIds.has(b.id)?{...b,...changes}:b));updateSelectionEditor();status("選択した足場へ手すり設定を反映しました")};
+$("columnBlock").onchange=()=>{loadColumnEditor();renderSelectionSection(selectedBlocks())};
+$("columnCorner").onchange=()=>{loadColumnEditor();renderSelectionSection(selectedBlocks())};
+$("columnRows").addEventListener("input",e=>{const i=e.target.dataset.columnSize;if(i===undefined)return;columnDraft[Number(i)].size=Number(e.target.value);validateColumnDraft()});
+$("columnRows").addEventListener("click",e=>{
+  const button=e.target.closest("button");if(!button||button.disabled)return;const d=button.dataset;
+  if(d.columnSplit!==undefined){const i=Number(d.columnSplit),p=columnDraft[i];if(p.size<2)return;const lower=Math.floor(p.size/2);columnDraft.splice(i,1,{kind:p.kind,size:lower},{kind:"regular",size:p.size-lower})}
+  if(d.columnJoin!==undefined){const i=Number(d.columnJoin);columnDraft.splice(i,2,{kind:"regular",size:columnDraft[i].size+columnDraft[i+1].size})}
+  if(d.columnDelete!==undefined)columnDraft.splice(Number(d.columnDelete),1);
+  if(d.columnUp!==undefined){const i=Number(d.columnUp);[columnDraft[i-1],columnDraft[i]]=[columnDraft[i],columnDraft[i-1]]}
+  if(d.columnDown!==undefined){const i=Number(d.columnDown);[columnDraft[i+1],columnDraft[i]]=[columnDraft[i],columnDraft[i+1]]}
+  renderColumnRows();
+});
+$("addColumnPart").onclick=()=>{columnDraft.push({kind:"regular",size:1900});renderColumnRows()};
+$("resetColumnParts").onclick=()=>applyColumnDraft(true);
+$("applyColumnParts").onclick=()=>applyColumnDraft();
+function focusColumnLabel(e){const target=e.target.closest("[data-column-part]");if(!target)return;if($("columnBlock").value!==target.dataset.columnBlock){$("columnBlock").value=target.dataset.columnBlock;loadColumnEditor()}const input=$("columnRows").querySelector(`[data-column-size="${target.dataset.columnPart}"]`);input?.focus();input?.select();input?.scrollIntoView({block:"nearest",behavior:"smooth"})}
+$("sectionModalView").addEventListener("click",focusColumnLabel);
+$("sectionModalView").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();focusColumnLabel(e)}});
+
 try{
   const data=JSON.parse(localStorage.getItem(KEY)||"{}");
+  if(data.defaultRails)defaultRails=normalizeRails(data.defaultRails);renderRailFields();
   if(Array.isArray(data.blocks))blocks=data.blocks.map(normalizeBlock);if(data.mmPerPx)mmPerPx=data.mmPerPx;
   if(data.drawingScale){drawingScale=data.drawingScale;$("drawingScale").value=drawingScale}
   if(Number.isFinite(data.defaultFL)){defaultFL=data.defaultFL;$("defaultFL").value=defaultFL}
@@ -708,3 +787,4 @@ try{
   if(typeof data.panelCollapsed==="boolean")panelCollapsed=data.panelCollapsed;if(blocks.length)status("前回の配置データを復元しました");
 }catch{localStorage.removeItem(KEY)}
 renderLevelRows();updateDefaultHeightPreview();applyPanelState();setStageSize();renderBlocks();updateSummary();updateSelectionEditor();status($("status").textContent);
+

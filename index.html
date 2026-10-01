@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="PDF・JWW図面上にIQ足場を配置し、基本部材の概算数量を拾えるツールです。">
   <link rel="icon" type="image/svg+xml" href="favicon.svg"><title>IQ足場簡易拾い｜IQ足場の概算数量</title>
-  <link rel="stylesheet" href="./style.css?v=33">
+  <link rel="stylesheet" href="./style.css?v=35">
 </head>
 <body>
   <header class="topbar">
@@ -78,6 +78,11 @@
           <label>足場幅</label>
           <select id="scaffoldWidth"><option>610</option><option>914</option><option>1219</option></select>
           <label class="stair-option"><input id="placeStair" type="checkbox"><span><strong>階段を設置</strong><small>1829スパン・1,900mm区間</small></span></label>
+          <div class="rail-settings" id="defaultRailSettings">
+            <strong>手すりの初期設定</strong>
+            <div id="defaultRailFields"></div>
+            <button class="btn outline full" id="applyRailsAll" type="button">配置済みの全足場にも反映</button>
+          </div>
           <button class="btn primary full" id="addMode">＋ 図面をクリックして配置</button>
         </div>
       </section>
@@ -127,6 +132,8 @@
             <button id="changeSelected" class="stair-toggle" type="button">選択内容に変更</button>
           </div>
           <div class="selection-actions"><button id="rotate">↻ 回転</button><button id="duplicate">⧉ 複製</button><button id="remove" class="danger">削除</button></div>
+          <div class="rail-settings"><strong>選択した足場の手すり</strong><div id="selectedRailFields"></div><p>外側は青い「外」マークの辺です。回転すると一緒に回転します。</p><button class="btn outline full" id="applySelectedRails" type="button">選択した足場に反映</button></div>
+          <div class="rail-legend"><span>━ 通常</span><span class="advance">┄ 先行</span><span>なし：線なし</span></div>
         </div>
       </section>
 
@@ -135,7 +142,7 @@
         <div class="metrics"><div><span>スパン数</span><strong id="metricCount">0</strong><small>箇所</small></div><div><span>延長</span><strong id="metricLength">0.0</strong><small>m</small></div><div><span>掛面積</span><strong id="metricArea">0.0</strong><small>㎡</small></div></div>
         <div class="table-wrap"><table><thead><tr><th>部材</th><th>数量</th></tr></thead><tbody id="quantityBody"><tr><td colspan="2" class="zero">足場を配置すると集計します</td></tr></tbody></table></div>
         <button class="btn outline full" id="csv" disabled>⇩ CSVで保存</button>
-        <p class="disclaimer">高さは1段目の作業床を基準とし、2段目以降は1,900mm間隔、足場上部レベルは最上段作業床＋900mmです。手すりは各作業床の450mm・900mm位置へ内外側とも配置して算出します。支柱は下部支柱を優先し、標準ジャッキベース（AJP）を使用します。発注・施工前に足場業者および有資格者が確認してください。</p>
+        <p class="disclaimer">高さは1段目の作業床を基準とし、2段目以降は1,900mm間隔、足場上部レベルは最上段作業床＋900mmです。通常手すりは各作業床の450mm・900mm位置、先行手すりは各作業床に1枚として設定側へ算出します。支柱割付は断面図で編集できます。支柱は下部支柱を優先し、標準ジャッキベース（AJP）を使用します。発注・施工前に足場業者および有資格者が確認してください。</p>
       </section>
       </div>
     </aside>
@@ -144,6 +151,15 @@
     <div class="section-modal-card">
       <div class="section-modal-head"><h2 id="sectionModalTitle">足場断面図（長手方向）</h2><button id="closeSectionModal" type="button" aria-label="拡大断面図を閉じる">×</button></div>
       <div class="section-modal-view" id="sectionModalView"></div>
+      <section class="column-editor" aria-labelledby="columnEditorTitle">
+        <h3 id="columnEditorTitle">支柱割付（下から順に編集）</h3>
+        <div class="two-fields"><div><label for="columnBlock">表示するスパン</label><select id="columnBlock"></select></div><div><label for="columnCorner">支柱位置</label><select id="columnCorner"><option value="all">選択スパンの全支柱</option><option value="0">平面 左上</option><option value="1">平面 右上</option><option value="2">平面 左下</option><option value="3">平面 右下</option></select></div></div>
+        <p>断面図の支柱寸法を押すと編集欄へ移動します。結合・分割で継ぎ位置を変更できます。</p>
+        <div id="columnRows"></div>
+        <datalist id="columnSizes"><option value="3800"><option value="2850"><option value="1900"><option value="1425"><option value="950"><option value="475"><option value="238"></datalist>
+        <p id="columnValidation" role="status" aria-live="polite"></p>
+        <div class="column-actions"><button type="button" id="addColumnPart">＋ 支柱を追加</button><button type="button" id="resetColumnParts">自動割付に戻す</button><button type="button" id="applyColumnParts" class="btn primary">割付を反映</button></div>
+      </section>
       <p>作業床高さは左側、建物FL・足場上部レベル・支柱構成は右側に分けて表示しています。</p>
     </div>
   </dialog>
@@ -153,6 +169,6 @@
   </footer>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/ArchivierteRepositories/jww-parser@b919877eb4d1ae9fa0b773d70025f27f8316ea48/wasm/public/wasm_exec.js"></script>
-  <script type="module" src="./app.js?v=34"></script>
+  <script type="module" src="./app.js?v=35"></script>
 </body>
 </html>
