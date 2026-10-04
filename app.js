@@ -7,6 +7,7 @@ const POST_SIZES=[3800,2850,1900,1425,950,475],LOWER_POST_SIZES=[2750,1425,950,4
 const RAIL_SIZES=[1829,1524,1219,1107,914,722,610,360,305,250],DECK_LENGTHS=[1829,1524,1219,914,610],DECK_WIDTHS=[490,240];
 const BASE_SCALE = 1.25, KEY = "ashiba-hayami-v1";
 const columnPlanCache=new Map();
+let sectionZoom=1,sectionPan=null,sectionPinch=null,sectionPointers=new Map(),sectionPreventClick=false;
 let defaultRails={outerProtection:"handrail",innerProtection:"handrail",endProtection:"handrail"},columnDraft=[],columnReference=null;
 let blocks=[],history=[],future=[],selectedId=null,selectedIds=new Set(),tool="add",placementStair=false;
 let span=1829,width=610,defaultFL=700,buildingFLs=[0],defaultBaseHeight=0,defaultFloorCount=1,drawingScale=100,mmPerPx=28.222,zoom=1;
@@ -359,23 +360,27 @@ function renderSelectionSection(selected){
   const preview=$("selectionSectionView"),totalSpan=items.reduce((sum,b)=>sum+sectionLength(b),0);
   const floorLevels=[...new Set(items.flatMap(block=>workFloorHeights(block).map(height=>Number(block.baseHeight||0)+height)))].sort((a,b)=>a-b),buildingLevels=buildingFLs.map(Number).filter(Number.isFinite);
   const minBase=Math.min(...items.map(block=>Number(block.baseHeight||0))),chartMin=Math.min(0,minBase,...buildingLevels),upperLevels=items.map(block=>Number(block.fl)+900),maxUpper=Math.max(...upperLevels,...buildingLevels,chartMin+1);
-  const bottom=138,top=20,left=92,right=242,usable=bottom-top,yAtFL=level=>bottom-((level-chartMin)/(maxUpper-chartMin))*usable;let cursor=left;
+  const allocationBlock=items.find(b=>b.id===$("columnBlock").value)??items.reduce((best,item)=>Number(item.fl)>Number(best.fl)?item:best,items[0]),allocationParts=sectionPostAllocation(allocationBlock,Number($("columnCorner").value)||0),allocationTotal=allocationParts.reduce((sum,part)=>sum+part.weight,0)||1;
+  const top=28,left=92,right=242,usable=Math.max(150,floorLevels.length*16,buildingLevels.length*14,allocationParts.length*14),bottom=top+usable,svgHeight=bottom+46;
+  const yAtFL=level=>bottom-((level-chartMin)/(maxUpper-chartMin))*usable;let cursor=left;
   const bays=items.map((block,index)=>{
     const bayLength=sectionLength(block),x1=cursor,x2=index===items.length-1?right:cursor+(right-left)*bayLength/totalSpan;cursor=x2;
     const base=Number(block.baseHeight||0),blockFloorLevels=workFloorHeights(block).map(height=>base+height);
     const floors=blockFloorLevels.map((level,floorIndex)=>{const y=yAtFL(level),r450=yAtFL(level+450),r900=yAtFL(level+900),lower=floorIndex>0?blockFloorLevels[floorIndex-1]:null;return`<line class="section-floor" x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"/>${[block.outerProtection,block.innerProtection].map((type,side)=>type==="none"?"":`<line class="section-handrail ${type}" x1="${x1}" y1="${r450+side*2}" x2="${x2}" y2="${r450+side*2}"/><line class="section-handrail ${type}" x1="${x1}" y1="${r900+side*2}" x2="${x2}" y2="${r900+side*2}"/>`).join("")}${block.hasStair&&lower!==null?`<line class="section-stair" x1="${x1+3}" y1="${yAtFL(lower)}" x2="${x2-3}" y2="${y}"/>`:""}`}).join("");
     const jointMarks=(x,corner)=>{const parts=columnParts(block,corner),total=columnTotal(parts);let used=0;return parts.slice(0,-1).map(part=>{used+=part.size;const y=yAtFL(base)-(yAtFL(base)-yAtFL(Number(block.fl)+900))*used/total;return `<line class="section-joint" x1="${x-4}" y1="${y}" x2="${x+4}" y2="${y}"/>`}).join("")};
-    return`${jointMarks(x1,0)}${index===items.length-1?jointMarks(x2,sectionAxis==="x"?1:2):""}<line class="section-post" x1="${x1}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x1}" y2="${yAtFL(base)}"/>${index===items.length-1?`<line class="section-post" x1="${x2}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x2}" y2="${yAtFL(base)}"/>`:""}${floors}<circle class="section-post-mark" cx="${x1}" cy="${yAtFL(base)}" r="2.3"/>${index===items.length-1?`<circle class="section-post-mark" cx="${x2}" cy="${yAtFL(base)}" r="2.3"/>`:""}<text class="section-bay-label" x="${(x1+x2)/2}" y="151" text-anchor="middle">${bayLength}</text>`;
+    return`${jointMarks(x1,0)}${index===items.length-1?jointMarks(x2,sectionAxis==="x"?1:2):""}<line class="section-post" x1="${x1}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x1}" y2="${yAtFL(base)}"/>${index===items.length-1?`<line class="section-post" x1="${x2}" y1="${yAtFL(Number(block.fl)+900)}" x2="${x2}" y2="${yAtFL(base)}"/>`:""}${floors}<circle class="section-post-mark" cx="${x1}" cy="${yAtFL(base)}" r="2.3"/>${index===items.length-1?`<circle class="section-post-mark" cx="${x2}" cy="${yAtFL(base)}" r="2.3"/>`:""}<text class="section-bay-label" x="${(x1+x2)/2}" y="${bottom+16}" text-anchor="middle">${bayLength}</text>`;
   }).join("");
   const floorDimensions=floorLevels.map(level=>{const y=yAtFL(level);return`<line class="section-extension" x1="72" y1="${y}" x2="${left-3}" y2="${y}"/><line class="section-level-tick" x1="69" y1="${y}" x2="75" y2="${y}"/><text class="section-level-label" x="66" y="${y+3}" text-anchor="end">作業床高さ ${level.toLocaleString()}</text>`}).join("");
   const buildingDimensions=buildingLevels.map((level,index)=>{const y=yAtFL(level);return`<line class="section-building-level" x1="${left-8}" y1="${y}" x2="${right+8}" y2="${y}"/><rect class="section-building-level-label-bg" x="${right+9}" y="${y-10}" width="48" height="10" rx="2"/><text class="section-building-level-label" x="${right+11}" y="${y-3}">${index+1}FL ${level.toLocaleString()}mm</text>`}).join("");
   const topLevel=Math.max(...upperLevels),topY=yAtFL(topLevel),baseY=yAtFL(minBase),zeroY=yAtFL(0);
   const topLabelY=Math.max(16,topY+2);
-  const allocationBlock=items.find(b=>b.id===$("columnBlock").value)??items.reduce((best,item)=>Number(item.fl)>Number(best.fl)?item:best,items[0]),allocationParts=sectionPostAllocation(allocationBlock,Number($("columnCorner").value)||0),allocationTotal=allocationParts.reduce((sum,part)=>sum+part.weight,0)||1;
-  let allocationY=baseY;
-  const allocationSvg=allocationParts.map((part,partIndex)=>{const next=allocationY-(baseY-topY)*part.weight/allocationTotal,mid=(allocationY+next)/2,svgPart=`<line class="section-allocation" x1="292" y1="${allocationY}" x2="292" y2="${next}" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-allocation-tick" x1="288" y1="${allocationY}" x2="296" y2="${allocationY}"/><text class="section-allocation-label editable-column" tabindex="0" role="button" data-column-part="${partIndex}" data-column-block="${allocationBlock.id}" x="299" y="${mid+2}">${part.label}</text>`;allocationY=next;return svgPart}).join("")+`<line class="section-allocation-tick" x1="288" y1="${topY}" x2="296" y2="${topY}"/><text class="section-allocation-title" x="288" y="${Math.max(12,topY-6)}">支柱構成</text><text class="section-allocation-label" x="299" y="${baseY+10}">＋標準ジャッキ</text>`;
-  const svg=`<svg viewBox="0 0 420 178" role="img" aria-label="長手方向 ${items.length}区画、合計${totalSpan}ミリ。作業床高さ、建物FL、支柱構成、足場上部レベルの寸法入り"><defs><marker id="sectionArrow" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 Z" class="section-arrow"/></marker></defs><line class="section-ground" x1="${left-10}" y1="${baseY+3}" x2="${right+10}" y2="${baseY+3}"/><text class="section-surface-label" x="${left-12}" y="${baseY+13}" text-anchor="end">設置面</text>${chartMin<=0&&zeroY>=top&&zeroY<=bottom?`<line class="section-fl-zero" x1="72" y1="${zeroY}" x2="${right+10}" y2="${zeroY}"/><text class="section-fl-zero-label" x="66" y="${zeroY+3}" text-anchor="end">FL 0</text>`:""}${buildingDimensions}${floorDimensions}${bays}<text class="section-post-label" x="${left}" y="${top-3}">支柱位置（${items.length+1}箇所）</text>${allocationSvg}<line class="section-dimension" x1="350" y1="${baseY}" x2="350" y2="${topY}" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${right+3}" y1="${topY}" x2="354" y2="${topY}"/><line class="section-extension" x1="${right+3}" y1="${baseY}" x2="354" y2="${baseY}"/><rect class="section-upper-label-bg" x="358" y="${topLabelY-8}" width="58" height="20" rx="2"/><text class="section-height" x="360" y="${topLabelY}"><tspan x="360">上部 FL</tspan><tspan x="360" dy="9">${topLevel.toLocaleString()} mm</tspan></text><line class="section-dimension" x1="${left}" y1="160" x2="${right}" y2="160" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${left}" y1="${baseY+3}" x2="${left}" y2="164"/><line class="section-extension" x1="${right}" y1="${baseY+3}" x2="${right}" y2="164"/><text class="section-width" x="${(left+right)/2}" y="174" text-anchor="middle">合計 ${totalSpan.toLocaleString()} mm</text><text class="section-badge" x="${left}" y="11">${items.length}区画・作業床最大${Math.max(...items.map(floorCountOf))}層・外 ${railNames[allocationBlock.outerProtection]}／内 ${railNames[allocationBlock.innerProtection]}</text></svg>`;
-  preview.innerHTML=svg;$("sectionModalView").innerHTML=svg;
+  let allocationY=yAtFL(Number(allocationBlock.baseHeight||0));
+  const allocationTop=yAtFL(Number(allocationBlock.fl)+900),allocationBottom=allocationY,allocationMids=[];let cumulative=0;
+  allocationParts.forEach(part=>{allocationMids.push(allocationBottom-(allocationBottom-allocationTop)*(cumulative+part.weight/2)/allocationTotal);cumulative+=part.weight});
+  const allocationLabels=spreadSectionLabels(allocationMids,allocationTop+4,allocationBottom-2,12);
+  const allocationSvg=allocationParts.map((part,partIndex)=>{const next=allocationY-(allocationBottom-allocationTop)*part.weight/allocationTotal,mid=(allocationY+next)/2,labelY=allocationLabels[partIndex],svgPart=`<line class="section-allocation" x1="330" y1="${allocationY}" x2="330" y2="${next}" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-allocation-tick" x1="326" y1="${allocationY}" x2="334" y2="${allocationY}"/>${Math.abs(labelY-mid)>1?`<path class="section-label-leader" d="M 334 ${mid} L 337 ${labelY}"/>`:""}<text class="section-allocation-label editable-column" tabindex="0" role="button" data-column-part="${partIndex}" data-column-block="${allocationBlock.id}" x="337" y="${labelY+2}">${part.label}</text>`;allocationY=next;return svgPart}).join("")+`<line class="section-allocation-tick" x1="326" y1="${topY}" x2="334" y2="${topY}"/><text class="section-allocation-title" x="326" y="${Math.max(12,Math.min(...allocationLabels)-10)}">支柱構成</text><text class="section-allocation-label" x="337" y="${baseY+10}">＋標準ジャッキ</text>`;
+  const svg=`<svg viewBox="0 0 530 ${svgHeight}" role="img" aria-label="長手方向 ${items.length}区画、合計${totalSpan}ミリ。作業床高さ、建物FL、支柱構成、足場上部レベルの寸法入り"><defs><marker id="sectionArrow" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 Z" class="section-arrow"/></marker></defs><line class="section-ground" x1="${left-10}" y1="${baseY+3}" x2="${right+10}" y2="${baseY+3}"/><text class="section-surface-label" x="${left-12}" y="${baseY+13}" text-anchor="end">設置面</text>${chartMin<=0&&zeroY>=top&&zeroY<=bottom?`<line class="section-fl-zero" x1="72" y1="${zeroY}" x2="${right+10}" y2="${zeroY}"/><text class="section-fl-zero-label" x="66" y="${zeroY+3}" text-anchor="end">FL 0</text>`:""}${buildingDimensions}${floorDimensions}${bays}<text class="section-post-label" x="${left}" y="${top-3}">支柱位置（${items.length+1}箇所）</text>${allocationSvg}<line class="section-dimension" x1="430" y1="${baseY}" x2="430" y2="${topY}" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${right+3}" y1="${topY}" x2="434" y2="${topY}"/><line class="section-extension" x1="${right+3}" y1="${baseY}" x2="434" y2="${baseY}"/><rect class="section-upper-label-bg" x="438" y="${topLabelY-8}" width="58" height="20" rx="2"/><text class="section-height" x="440" y="${topLabelY}"><tspan x="440">上部 FL</tspan><tspan x="440" dy="9">${topLevel.toLocaleString()} mm</tspan></text><line class="section-dimension" x1="${left}" y1="160" x2="${right}" y2="${bottom+25}" marker-start="url(#sectionArrow)" marker-end="url(#sectionArrow)"/><line class="section-extension" x1="${left}" y1="${baseY+3}" x2="${left}" y2="${bottom+29}"/><line class="section-extension" x1="${right}" y1="${baseY+3}" x2="${right}" y2="${bottom+29}"/><text class="section-width" x="${(left+right)/2}" y="${bottom+40}" text-anchor="middle">合計 ${totalSpan.toLocaleString()} mm</text><text class="section-badge" x="${left}" y="11">${items.length}区画・作業床最大${Math.max(...items.map(floorCountOf))}層・外 ${railNames[allocationBlock.outerProtection]}／内 ${railNames[allocationBlock.innerProtection]}</text></svg>`;
+  preview.innerHTML=svg;$("sectionModalView").innerHTML=svg;applySectionZoom();
 }
 function updateSelectionEditor(){
   const selected=selectedBlocks(),has=selected.length>0;$("selectionEmpty").classList.toggle("hidden",has);$("selectionEditor").classList.toggle("hidden",!has);
@@ -682,7 +687,7 @@ $("changeSelected").onclick=()=>{
   commit(blocks.map(block=>selectedIds.has(block.id)?{...block,span:asStair?1829:nextSpan,width:nextWidth,hasStair:asStair}:block));
   updateSelectionEditor();status(selected.length+"件を "+(asStair?"1829 × "+nextWidth+" 階段付き":nextSpan+" × "+nextWidth)+" に変更しました");
 };
-const openSectionModal=()=>{if(selectedIds.size&&!$("sectionModal").open){$("sectionModal").showModal();loadColumnEditor();renderSelectionSection(selectedBlocks())}};
+const openSectionModal=()=>{if(selectedIds.size&&!$("sectionModal").open){sectionZoom=1;$("sectionModal").showModal();loadColumnEditor();renderSelectionSection(selectedBlocks());$("sectionModalView").scrollTop=0;$("sectionModalView").scrollLeft=0}};
 $("selectionSectionView").onclick=openSectionModal;
 $("selectionSectionView").onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();openSectionModal()}};
 $("closeSectionModal").onclick=()=>$("sectionModal").close();
@@ -770,9 +775,71 @@ $("columnRows").addEventListener("click",e=>{
 $("addColumnPart").onclick=()=>{columnDraft.push({kind:"regular",size:1900});renderColumnRows()};
 $("resetColumnParts").onclick=()=>applyColumnDraft(true);
 $("applyColumnParts").onclick=()=>applyColumnDraft();
-function focusColumnLabel(e){const target=e.target.closest("[data-column-part]");if(!target)return;if($("columnBlock").value!==target.dataset.columnBlock){$("columnBlock").value=target.dataset.columnBlock;loadColumnEditor()}const input=$("columnRows").querySelector(`[data-column-size="${target.dataset.columnPart}"]`);input?.focus();input?.select();input?.scrollIntoView({block:"nearest",behavior:"smooth"})}
+function focusColumnLabel(e){if(sectionPreventClick){sectionPreventClick=false;return}const target=e.target.closest("[data-column-part]");if(!target)return;if($("columnBlock").value!==target.dataset.columnBlock){$("columnBlock").value=target.dataset.columnBlock;loadColumnEditor()}const input=$("columnRows").querySelector(`[data-column-size="${target.dataset.columnPart}"]`);input?.focus();input?.select();input?.scrollIntoView({block:"nearest",behavior:"smooth"})}
 $("sectionModalView").addEventListener("click",focusColumnLabel);
 $("sectionModalView").addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();focusColumnLabel(e)}});
+
+function spreadSectionLabels(positions,minY,maxY,gap){
+  const ordered=positions.map((y,index)=>({y,index})).sort((a,b)=>a.y-b.y),result=[];
+  minY=Math.min(minY,maxY-Math.max(0,ordered.length-1)*gap);
+  ordered.forEach((item,i)=>result[item.index]=Math.max(item.y,i?result[ordered[i-1].index]+gap:minY));
+  if(ordered.length&&result[ordered.at(-1).index]>maxY){
+    result[ordered.at(-1).index]=maxY;
+    for(let i=ordered.length-2;i>=0;i--)result[ordered[i].index]=Math.min(result[ordered[i].index],result[ordered[i+1].index]-gap);
+  }
+  return result;
+}
+function sectionBaseWidth(){return Math.max(840,$("sectionModalView").clientWidth-24)}
+function applySectionZoom(){
+  const view=$("sectionModalView"),svg=view.querySelector("svg");if(!svg)return;
+  const box=svg.viewBox.baseVal,displayWidth=sectionBaseWidth()*sectionZoom;
+  svg.style.width=displayWidth+"px";svg.style.height=displayWidth*box.height/box.width+"px";
+  $("sectionZoomLabel").textContent=Math.round(sectionZoom*100)+"%";
+  $("sectionZoomOut").disabled=sectionZoom<=.05;$("sectionZoomIn").disabled=sectionZoom>=8;
+}
+function changeSectionZoom(next,anchor=null){
+  const view=$("sectionModalView"),rect=view.getBoundingClientRect(),old=sectionZoom;
+  const x=anchor?anchor.x-rect.left:view.clientWidth/2,y=anchor?anchor.y-rect.top:view.clientHeight/2;
+  const contentX=view.scrollLeft+x-12,contentY=view.scrollTop+y-12;
+  sectionZoom=Math.max(.05,Math.min(8,Number(next)||1));applySectionZoom();
+  view.scrollLeft=Math.max(0,contentX*sectionZoom/old+12-x);view.scrollTop=Math.max(0,contentY*sectionZoom/old+12-y);
+}
+$("sectionZoomIn").onclick=()=>changeSectionZoom(sectionZoom*1.25);
+$("sectionZoomOut").onclick=()=>changeSectionZoom(sectionZoom/1.25);
+$("sectionActualSize").onclick=()=>changeSectionZoom(1);
+$("sectionFitView").onclick=()=>{
+  const view=$("sectionModalView"),svg=view.querySelector("svg");if(!svg)return;
+  const box=svg.viewBox.baseVal,base=sectionBaseWidth();
+  changeSectionZoom(Math.min((view.clientWidth-24)/base,(view.clientHeight-24)/(base*box.height/box.width)));
+  view.scrollTop=0;view.scrollLeft=0;
+};
+$("sectionModalView").addEventListener("wheel",e=>{e.preventDefault();changeSectionZoom(sectionZoom*Math.exp(-e.deltaY*.002),{x:e.clientX,y:e.clientY})},{passive:false});
+$("sectionModalView").addEventListener("pointerdown",e=>{
+  if(e.button!==0&&e.button!==1)return;
+  const view=$("sectionModalView");sectionPreventClick=false;
+  sectionPointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(sectionPointers.size===2){const points=[...sectionPointers.values()];sectionPinch={distance:Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y),zoom:sectionZoom};sectionPan=null;sectionPreventClick=true}
+  else sectionPan={id:e.pointerId,x:e.clientX,y:e.clientY,left:view.scrollLeft,top:view.scrollTop,moved:false};
+  // Keep label clicks targeted at their text; capture after an actual drag begins.
+});
+$("sectionModalView").addEventListener("pointermove",e=>{
+  if(!sectionPointers.has(e.pointerId))return;
+  const view=$("sectionModalView");sectionPointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+  if(sectionPinch&&sectionPointers.size===2){const points=[...sectionPointers.values()],distance=Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y);if(sectionPinch.distance>0)changeSectionZoom(sectionPinch.zoom*distance/sectionPinch.distance,{x:(points[0].x+points[1].x)/2,y:(points[0].y+points[1].y)/2});return}
+  if(!sectionPan||sectionPan.id!==e.pointerId)return;
+  const dx=e.clientX-sectionPan.x,dy=e.clientY-sectionPan.y;
+  if(Math.hypot(dx,dy)>4){sectionPan.moved=true;sectionPreventClick=true;view.setPointerCapture(e.pointerId);view.classList.add("is-section-panning")}
+  if(sectionPan.moved){view.scrollLeft=sectionPan.left-dx;view.scrollTop=sectionPan.top-dy}
+});
+function endSectionPointer(e){
+  const view=$("sectionModalView");sectionPointers.delete(e.pointerId);sectionPinch=null;
+  if(view.hasPointerCapture(e.pointerId))view.releasePointerCapture(e.pointerId);
+  sectionPan=null;view.classList.remove("is-section-panning");
+}
+$("sectionModalView").addEventListener("pointerup",endSectionPointer);
+$("sectionModalView").addEventListener("pointercancel",endSectionPointer);
+$("sectionModal").addEventListener("close",()=>{sectionPointers.clear();sectionPinch=null;sectionPan=null;sectionPreventClick=false;$("sectionModalView").classList.remove("is-section-panning")});
+window.addEventListener("resize",()=>{if($("sectionModal").open)applySectionZoom()});
 
 try{
   const data=JSON.parse(localStorage.getItem(KEY)||"{}");

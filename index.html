@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="description" content="PDF・JWW図面上にIQ足場を配置し、基本部材の概算数量を拾えるツールです。">
   <link rel="icon" type="image/svg+xml" href="favicon.svg"><title>IQ足場簡易拾い｜IQ足場の概算数量</title>
-  <link rel="stylesheet" href="./style.css?v=35">
+  <link rel="stylesheet" href="./style.css?v=36">
 </head>
 <body>
   <header class="topbar">
@@ -150,7 +150,15 @@
   <dialog class="section-modal" id="sectionModal" aria-labelledby="sectionModalTitle">
     <div class="section-modal-card">
       <div class="section-modal-head"><h2 id="sectionModalTitle">足場断面図（長手方向）</h2><button id="closeSectionModal" type="button" aria-label="拡大断面図を閉じる">×</button></div>
-      <div class="section-modal-view" id="sectionModalView"></div>
+      <div class="section-view-toolbar" role="group" aria-label="断面図の表示倍率">
+        <button type="button" id="sectionZoomOut" aria-label="断面図を縮小">−</button>
+        <output id="sectionZoomLabel" aria-live="polite">100%</output>
+        <button type="button" id="sectionZoomIn" aria-label="断面図を拡大">＋</button>
+        <button type="button" id="sectionFitView">全体表示</button>
+        <button type="button" id="sectionActualSize">100%に戻す</button>
+        <span>ホイールで拡大・縮小／ドラッグで移動</span>
+      </div>
+      <div class="section-modal-view" id="sectionModalView" tabindex="0" aria-label="断面図。拡大後はスクロールまたはドラッグで移動できます"></div>
       <section class="column-editor" aria-labelledby="columnEditorTitle">
         <h3 id="columnEditorTitle">支柱割付（下から順に編集）</h3>
         <div class="two-fields"><div><label for="columnBlock">表示するスパン</label><select id="columnBlock"></select></div><div><label for="columnCorner">支柱位置</label><select id="columnCorner"><option value="all">選択スパンの全支柱</option><option value="0">平面 左上</option><option value="1">平面 右上</option><option value="2">平面 左下</option><option value="3">平面 右下</option></select></div></div>
@@ -169,6 +177,6 @@
   </footer>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <script src="https://cdn.jsdelivr.net/gh/ArchivierteRepositories/jww-parser@b919877eb4d1ae9fa0b773d70025f27f8316ea48/wasm/public/wasm_exec.js"></script>
-  <script type="module" src="./app.js?v=35"></script>
+  <script type="module" src="./app.js?v=36"></script>
 </body>
 </html>
